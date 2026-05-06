@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "SkyBox",
+  "project_id": "d4f213e2-bcae-46f1-b201-3b5b411d5c97"
+}

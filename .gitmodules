@@ -1,0 +1,6 @@
+[submodule "vendor/matchbox"]
+	path = vendor/matchbox
+	url = /tmp/matchbox
+[submodule "refs/bx-demos"]
+	path = refs/bx-demos
+	url = https://github.com/ortus-boxlang/bx-demos.git
