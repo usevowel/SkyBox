@@ -1,0 +1,14 @@
+{
+    "name": "{{appName}}",
+    "private": true,
+    "scripts": {
+        "build": "box skybox build --multi-source --src-dir src --listener-class {{listenerClass}}",
+        "dev": "box skybox dev --watch",
+        "deploy": "npm run build && wrangler deploy",
+        "dev:nowatch": "npm run build && wrangler dev --local"
+    },
+    "devDependencies": {
+        "wrangler": "^4.0.0",
+        "chokidar": "^4.0.0"
+    }
+}

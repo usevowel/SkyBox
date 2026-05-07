@@ -1,0 +1,67 @@
+/**
+ *  {{listenerClass}} — SkyBox WebSocket Listener
+ *
+ *  Each connected WebSocket routes through this listener.
+ *  State is persisted via Durable Object Hibernation API.
+ *
+ *  IMPORTANT:
+ *    - Use `variables.xxx = (variables.xxx ?: default)` for persistent state
+ *    - deserializeJSON is unavailable — use text-based command protocols
+ *    - Compare IDs as strings: `if (id & "" == "1" & "") { ... }`
+ */
+class {{listenerClass}} {
+
+    /**
+     * Called when a new WebSocket connects
+     *
+     * @channel The WebSocket channel object
+     */
+    function onConnect( required channel ) {
+        variables.connectionCount = (variables.connectionCount ?: 0) + 1;
+        channel.sendJson( {
+            "type"    : "connected",
+            "message" : "Welcome! You are connection " & variables.connectionCount
+        } );
+    }
+
+    /**
+     * Called when a text message arrives
+     *
+     * @message The incoming message string
+     * @channel The WebSocket channel object
+     */
+    function onMessage( required message, required channel ) {
+        var parts = listToArray( message, " " );
+        var cmd = lcase( trim( parts[ 1 ] ?: "" ) );
+
+        if ( cmd == "hello" ) {
+            channel.sendJson( { "type" : "response", "text" : "Hello from SkyBox!" } );
+        } else if ( cmd == "count" ) {
+            channel.sendJson( { "type" : "response", "count" : variables.connectionCount } );
+        } else if ( cmd == "echo" ) {
+            var echoText = trim( message.right( len( message ) - 4 ) );
+            channel.sendJson( { "type" : "echo", "text" : echoText } );
+        } else if ( cmd == "help" ) {
+            channel.sendJson( {
+                "type" : "help",
+                "commands" : "hello, echo <text>, count, help"
+            } );
+        } else {
+            channel.sendJson( {
+                "type"  : "error",
+                "text"  : "Unknown command: " & cmd,
+                "hint"  : "Try: hello, echo <text>, count, help"
+            } );
+        }
+    }
+
+    /**
+     * Called when a WebSocket closes
+     *
+     * @channel The WebSocket channel object
+     */
+    function onClose( required channel ) {
+        // Cleanup if needed
+    }
+
+}

@@ -1,0 +1,62 @@
+/**
+ *  AppState — Shared Application State Manager
+ *
+ *  Manages global state across all WebSocket connections.
+ *  State is persisted via Durable Object Hibernation API
+ *  after each onMessage call.
+ *
+ *  IMPORTANT: Always use `variables.xxx = (variables.xxx ?: default)`
+ *  pattern since class-level inits don't persist on WASM.
+ */
+class models.AppState {
+
+    /**
+     *  Increment a named counter and return the new value
+     */
+    function increment( required string name ) {
+        variables[ name ] = ( variables[ name ] ?: 0 ) + 1;
+        return variables[ name ];
+    }
+
+    /**
+     *  Get a counter value
+     */
+    function getCount( required string name ) {
+        return variables[ name ] ?: 0;
+    }
+
+    /**
+     *  Set a key-value pair in shared state
+     */
+    function set( required string key, required value ) {
+        variables[ key ] = value;
+    }
+
+    /**
+     *  Get a value from shared state
+     */
+    function get( required string key ) {
+        return variables[ key ] ?: "";
+    }
+
+    /**
+     *  Check if a key exists in shared state
+     */
+    function exists( required string key ) {
+        return structKeyExists( variables, key );
+    }
+
+    /**
+     *  Get all state keys (excluding internal ones)
+     */
+    function getKeys() {
+        var keys = [];
+        for ( var key in variables ) {
+            if ( left( key, 1 ) != "_" ) {
+                arrayAppend( keys, key );
+            }
+        }
+        return keys;
+    }
+
+}

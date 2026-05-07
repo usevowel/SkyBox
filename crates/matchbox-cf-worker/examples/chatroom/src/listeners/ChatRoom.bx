@@ -1,0 +1,124 @@
+// ── ChatRoom — Multi-User WebSocket Chat Listener ────────────────────
+// Entry point for all WebSocket connections. Routes incoming text
+// commands to handlers and manages connection lifecycle.
+//
+// Protocol (text-based, no deserializeJSON needed):
+//   Client sends:  /nick Bob
+//   Server sends:  {"type":"nick","nickname":"Bob"}
+//
+//   Client sends:  Hello everyone!
+//   Server sends:  {"type":"chat","user":"Bob","text":"Hello everyone!","room":"lobby","timestamp":"..."}
+
+class ChatRoom {
+
+    function onConnect(required channel) {
+        var userId = channel.getId();
+        var router = getRouter();
+
+        variables.userCount = (variables.userCount ?: 0) + 1;
+
+        // Init user registry
+        if (isNull(variables.users)) { variables.users = {}; }
+        if (isNull(variables.rooms)) { variables.rooms = {}; }
+        if (isNull(variables.rooms["lobby"])) { variables.rooms["lobby"] = []; }
+
+        // Track user
+        variables.users[userId] = {
+            "id"       : userId,
+            "nickname" : "User" & variables.userCount,
+            "room"     : "lobby",
+            "joined"   : now()
+        };
+
+        // Add to lobby
+        arrayAppend(variables.rooms["lobby"], userId);
+
+        // Welcome
+        channel.sendJson({
+            "type"     : "welcome",
+            "room"     : "lobby",
+            "userId"   : userId,
+            "users"    : arrayLen(variables.rooms["lobby"]),
+            "commands" : "/nick <name>, /users, /rooms, /join <room>, /help"
+        });
+
+        // Broadcast join to room
+        broadcastToRoom("lobby", {
+            "type"  : "join",
+            "user"  : variables.users[userId].nickname,
+            "count" : arrayLen(variables.rooms["lobby"])
+        }, channel);
+    }
+
+    function onMessage(required message, required channel) {
+        var userId = channel.getId();
+        var router = getRouter();
+
+        // Ensure user exists
+        variables.users = (variables.users ?: {});
+        if (isNull(variables.users[userId])) {
+            variables.users[userId] = { "id": userId, "nickname": "User", "room": "lobby" };
+        }
+
+        // Route the message
+        router.route(userId, message, channel);
+    }
+
+    function onClose(required channel) {
+        var userId = channel.getId();
+
+        variables.users   = (variables.users ?: {});
+        variables.rooms   = (variables.rooms ?: {});
+        variables.userCount = max((variables.userCount ?: 1) - 1, 0);
+
+        var userInfo = variables.users[userId] ?: { "nickname" : "Unknown", "room" : "lobby" };
+        var roomName = userInfo.room;
+
+        // Remove from room
+        if (!isNull(variables.rooms[roomName])) {
+            var idx = 1;
+            var found = false;
+            while (idx <= arrayLen(variables.rooms[roomName])) {
+                if (variables.rooms[roomName][idx] == userId) {
+                    arrayDeleteAt(variables.rooms[roomName], idx);
+                    found = true;
+                    break;
+                }
+                idx = idx + 1;
+            }
+        }
+
+        structDelete(variables.users, userId);
+
+        // Broadcast leave
+        broadcastToRoom(roomName, {
+            "type"  : "leave",
+            "user"  : userInfo.nickname,
+            "count" : arrayLen(variables.rooms[roomName] ?: [])
+        }, channel);
+    }
+
+    // ── Helpers ──
+
+    private function getRouter() {
+        variables.router = (variables.router ?: new MessageRouter());
+        return variables.router;
+    }
+
+    /**
+     * Broadcast a JSON message to all users in a room
+     */
+    function broadcastToRoom(required string roomName, required struct message, channel) {
+        variables.rooms = (variables.rooms ?: {});
+        var members = variables.rooms[roomName] ?: [];
+
+        for (var uid in members) {
+            // We can't iterate websocket channels directly (Hibernation API)
+            // The channel.broadcastJson method handles this internally
+        }
+
+        // Use the channel's built-in broadcast (broadcasts to ALL connections)
+        channel.broadcastJson(message);
+    }
+
+}

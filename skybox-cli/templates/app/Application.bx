@@ -1,0 +1,57 @@
+/**
+ *  Application.bx — SkyBox App Configuration
+ *
+ *  This pseudo-constructor runs once when the BoxLang VM initializes
+ *  on the WASM target. Use it to configure mappings, set defaults,
+ *  and initialize shared state.
+ *
+ *  IMPORTANT:
+ *    - This runs BEFORE any WebSocket connects
+ *    - Use `this.xxx` for config properties
+ *    - Use `variables.xxx` for runtime state
+ *    - deserializeJSON is unavailable — use manual parsing
+ */
+class {
+
+    // ── App Metadata ──
+    this.name        = "{{appName}}";
+    this.version     = "1.0.0";
+    this.description = "SkyBox BoxLang WebSocket App";
+
+    // ── WebSocket Config ──
+    this.ws = {
+        uri           : "/ws",
+        listenerClass : "{{listenerClass}}",
+        handler       : "AppListener.bx"
+    };
+
+    // ── Custom Settings (available via this.settings) ──
+    this.settings = {
+        maxMessageSize  : 4096,
+        logLevel        : "info",
+        defaultRoom     : "lobby"
+    };
+
+    /**
+     *  Initialize shared app state
+     *  Called once at VM startup
+     */
+    function onAppInit() {
+        variables.appState = {
+            startTime      : now(),
+            connectionCount : 0,
+            rooms          : structNew()
+        };
+    }
+
+    /**
+     *  Get a config value with optional default
+     */
+    function getConfig( required string key, string default = "" ) {
+        if ( this.settings.keyExists( key ) ) {
+            return this.settings[ key ];
+        }
+        return default;
+    }
+
+}

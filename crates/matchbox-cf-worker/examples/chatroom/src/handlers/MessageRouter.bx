@@ -1,0 +1,218 @@
+// ── MessageRouter — Routes text commands to chat handlers ─────────────
+// Text-based command protocol (no JSON parsing needed on WASM).
+//
+// Commands:
+//   /nick <name>       Set your nickname
+//   /users             List users in current room
+//   /rooms             List available rooms
+//   /join <room>       Join a different room
+//   /msg <user> <txt>  Send private message
+//   /help              Show this help
+//   <any text>         Chat message to current room
+
+class MessageRouter {
+
+    function route(required string userId, required string message, required channel) {
+        // Check for command (/xxx)
+        if (left(message, 1) == "/") {
+            var spacePos = find(" ", message);
+            if (spacePos == 0) { spacePos = len(message) + 1; }
+            var cmd = lcase(mid(message, 2, spacePos - 2));
+            var args = "";
+            if (spacePos <= len(message)) {
+                args = trim(mid(message, spacePos + 1, len(message) - spacePos));
+            }
+            handleCommand(userId, cmd, args, channel);
+        } else {
+            // Plain text = chat message
+            handleChat(userId, message, channel);
+        }
+    }
+
+    private function handleCommand(required string userId, required string cmd, required string args, required channel) {
+        if (cmd == "nick") {
+            handleNick(userId, args, channel);
+        } else if (cmd == "users") {
+            handleListUsers(userId, channel);
+        } else if (cmd == "rooms") {
+            handleListRooms(userId, channel);
+        } else if (cmd == "join") {
+            handleJoin(userId, args, channel);
+        } else if (cmd == "msg") {
+            handlePrivateMsg(userId, args, channel);
+        } else if (cmd == "help") {
+            handleHelp(channel);
+        } else {
+            channel.sendJson({ "type" : "error", "text" : "Unknown command: /" & cmd & ". Try /help" });
+        }
+    }
+
+    private function handleNick(required string userId, required string newNick, required channel) {
+        variables.users = (variables.users ?: {});
+        variables.users[userId] = variables.users[userId] ?: { "nickname" : "User", "room" : "lobby" };
+
+        var oldNick = variables.users[userId].nickname;
+        if (trim(newNick).len() == 0) {
+            channel.sendJson({ "type" : "error", "text" : "Usage: /nick <name>" });
+            return;
+        }
+        if (len(newNick) > 20) {
+            newNick = left(newNick, 20);
+        }
+
+        variables.users[userId].nickname = newNick;
+
+        channel.sendJson({ "type" : "nick", "nickname" : newNick });
+        channel.broadcastJson({ "type" : "notice", "text" : oldNick & " is now known as " & newNick });
+    }
+
+    private function handleChat(required string userId, required string text, required channel) {
+        variables.users = (variables.users ?: {});
+        variables.messages = (variables.messages ?: []);
+
+        var userInfo = variables.users[userId] ?: { "nickname" : "Anonymous", "room" : "lobby" };
+
+        // Store message history (keep last 50)
+        var chatMsg = {
+            "type"      : "chat",
+            "user"      : userInfo.nickname,
+            "text"      : left(text, 1024),
+            "room"      : userInfo.room,
+            "timestamp" : now()
+        };
+        arrayAppend(variables.messages, chatMsg);
+        if (arrayLen(variables.messages) > 50) {
+            arrayDeleteAt(variables.messages, 1);
+        }
+
+        // Broadcast to all
+        channel.broadcastJson(chatMsg);
+    }
+
+    private function handleListUsers(required string userId, required channel) {
+        variables.users = (variables.users ?: {});
+        variables.rooms = (variables.rooms ?: {});
+
+        var userInfo = variables.users[userId] ?: { "room" : "lobby" };
+        var roomName = userInfo.room;
+        var roomMembers = variables.rooms[roomName] ?: [];
+        var userList = [];
+
+        for (var uid in roomMembers) {
+            var u = variables.users[uid] ?: { "nickname" : "?" };
+            arrayAppend(userList, u.nickname);
+        }
+
+        channel.sendJson({
+            "type"  : "users",
+            "room"  : roomName,
+            "count" : arrayLen(userList),
+            "users" : userList
+        });
+    }
+
+    private function handleListRooms(required string userId, required channel) {
+        variables.rooms = (variables.rooms ?: {});
+        var roomList = [];
+        for (var r in variables.rooms) {
+            arrayAppend(roomList, { "name" : r, "users" : arrayLen(variables.rooms[r]) });
+        }
+
+        channel.sendJson({
+            "type"  : "rooms",
+            "count" : arrayLen(roomList),
+            "rooms" : roomList
+        });
+    }
+
+    private function handleJoin(required string userId, required string roomName, required channel) {
+        variables.users = (variables.users ?: {});
+        variables.rooms = (variables.rooms ?: {});
+
+        if (trim(roomName).len() == 0) {
+            channel.sendJson({ "type" : "error", "text" : "Usage: /join <room>" });
+            return;
+        }
+
+        var userInfo = variables.users[userId] ?: { "nickname" : "User", "room" : "lobby" };
+        var oldRoom = userInfo.room;
+
+        // Leave old room
+        if (!isNull(variables.rooms[oldRoom])) {
+            var idx = 1;
+            while (idx <= arrayLen(variables.rooms[oldRoom])) {
+                if (variables.rooms[oldRoom][idx] == userId) {
+                    arrayDeleteAt(variables.rooms[oldRoom], idx);
+                    break;
+                }
+                idx = idx + 1;
+            }
+            channel.broadcastJson({ "type" : "notice", "text" : userInfo.nickname & " left " & oldRoom });
+        }
+
+        // Create room if new
+        if (isNull(variables.rooms[roomName])) {
+            variables.rooms[roomName] = [];
+        }
+
+        // Join new room
+        arrayAppend(variables.rooms[roomName], userId);
+        userInfo.room = roomName;
+        variables.users[userId] = userInfo;
+
+        channel.sendJson({ "type" : "join", "room" : roomName });
+        channel.broadcastJson({ "type" : "notice", "text" : userInfo.nickname & " joined " & roomName });
+    }
+
+    private function handlePrivateMsg(required string userId, required string args, required channel) {
+        variables.users = (variables.users ?: {});
+        var userInfo = variables.users[userId] ?: { "nickname" : "User" };
+
+        // Format: /msg <targetNick> <message>
+        var spacePos = find(" ", args);
+        if (spacePos == 0) {
+            channel.sendJson({ "type" : "error", "text" : "Usage: /msg <user> <message>" });
+            return;
+        }
+
+        var targetNick = left(args, spacePos - 1);
+        var msgText = trim(mid(args, spacePos + 1, len(args) - spacePos));
+
+        // Find the target user
+        var targetId = "";
+        for (var uid in variables.users) {
+            if (variables.users[uid].nickname == targetNick) {
+                targetId = uid;
+                break;
+            }
+        }
+
+        if (targetId.len() == 0) {
+            channel.sendJson({ "type" : "error", "text" : "User '" & targetNick & "' not found" });
+            return;
+        }
+
+        // Send private message (broadcast with private type — client filters by userId)
+        channel.sendJson({
+            "type"     : "private",
+            "to"       : targetNick,
+            "from"     : userInfo.nickname,
+            "text"     : msgText
+        });
+    }
+
+    private function handleHelp(required channel) {
+        channel.sendJson({
+            "type"     : "help",
+            "commands" : [
+                "/nick <name>       Set your nickname",
+                "/users             List users in room",
+                "/rooms             List available rooms",
+                "/join <room>       Join a room",
+                "/msg <user> <txt>  Private message",
+                "/help              Show this help"
+            ]
+        });
+    }
+
+}

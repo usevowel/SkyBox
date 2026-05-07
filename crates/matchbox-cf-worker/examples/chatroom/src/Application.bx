@@ -1,0 +1,34 @@
+// ── Application.bx — ChatRoom App Configuration ──────────────────────
+// Runs once at VM startup. Sets up config and shared state.
+
+class Application {
+
+    this.name        = "SkyBox ChatRoom";
+    this.version     = "1.0.0";
+    this.description = "Multi-user WebSocket chat room";
+
+    this.ws = {
+        uri           : "/ws",
+        listenerClass : "ChatRoom",
+        handler       : "ChatRoom.bx"
+    };
+
+    this.settings = {
+        maxMessageLength : 4096,
+        maxUsers         : 100,
+        maxRooms         : 10,
+        defaultRoom      : "lobby",
+        historySize      : 50
+    };
+
+    /**
+     * Initialize shared state at VM startup
+     */
+    function onAppInit() {
+        variables.appState = {
+            startTime : now(),
+            rooms     : { "lobby" : { "name" : "lobby", "users" : 0 } }
+        };
+    }
+
+}

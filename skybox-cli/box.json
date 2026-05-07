@@ -1,0 +1,44 @@
+{
+    "name": "SkyBox CLI",
+    "slug": "skybox-cli",
+    "version": "1.0.0",
+    "author": "SkyBox Contributors",
+    "homepage": "https://github.com/c0d3t3k/SkyBox",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/c0d3t3k/SkyBox"
+    },
+    "bugs": "https://github.com/c0d3t3k/SkyBox/issues",
+    "shortDescription": "CLI tooling for SkyBox — BoxLang WebSockets on Cloudflare Workers",
+    "description": "Build, develop, and deploy BoxLang WebSocket applications running on Cloudflare Workers via WASM. Scaffold new projects, compile .bx sources to WASM, run a local dev server with wrangler, and deploy to production.",
+    "type": "commandbox-modules",
+    "keywords": [
+        "boxlang",
+        "cloudflare",
+        "workers",
+        "websocket",
+        "wasm",
+        "skybox",
+        "matchbox"
+    ],
+    "license": [
+        {
+            "type": "Apache-2.0",
+            "url": "http://www.apache.org/licenses/LICENSE-2.0"
+        }
+    ],
+    "contributors": [],
+    "dependencies": {},
+    "devDependencies": {
+        "testbox": "^5.0.0"
+    },
+    "ignore": [
+        "**/.*",
+        "/tests/",
+        "/test/"
+    ],
+    "scripts": {
+        "test": "testbox run",
+        "format": "cfformat run commands,models,ModuleConfig.cfc --overwrite"
+    }
+}

@@ -1,0 +1,78 @@
+/**
+ *  AppListener — Main WebSocket Listener
+ *
+ *  Entry point for all WebSocket connections. Delegates to
+ *  handlers and models for business logic.
+ *
+ *  This class is configured as `this.ws.listenerClass` in
+ *  Application.bx.
+ */
+class AppListener {
+
+    /**
+     *  Called when a new WebSocket connects
+     *
+     *  @channel The WebSocket channel object
+     */
+    function onConnect( required channel ) {
+        // Track connection count in shared state
+        variables.connectionCount = ( variables.connectionCount ?: 0 ) + 1;
+
+        // Welcome the new connection
+        channel.sendJson( {
+            "type"    : "connected",
+            "message" : "Welcome to " & applicationName() & "!",
+            "stats"   : {
+                "connections" : variables.connectionCount,
+                "uptime"      : uptime()
+            }
+        } );
+    }
+
+    /**
+     *  Called when a text message arrives
+     *
+     *  Routes commands to the MessageRouter handler.
+     *
+     *  @message The incoming message string
+     *  @channel The WebSocket channel object
+     */
+    function onMessage( required message, required channel ) {
+        var router = messageRouter();
+        router.route( message, channel );
+    }
+
+    /**
+     *  Called when a WebSocket closes
+     *
+     *  @channel The WebSocket channel object
+     */
+    function onClose( required channel ) {
+        // Cleanup handled by models
+    }
+
+    // ── Helper Functions ──
+
+    /**
+     *  Get the message router handler instance
+     */
+    private function messageRouter() {
+        variables.router = ( variables.router ?: new handlers.MessageRouter() );
+        return variables.router;
+    }
+
+    /**
+     *  Get the application name from Application.bx
+     */
+    private function applicationName() {
+        return "SkyBox App";
+    }
+
+    /**
+     *  Calculate uptime in seconds since VM started
+     */
+    private function uptime() {
+        return "N/A";
+    }
+
+}

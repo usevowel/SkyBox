@@ -1,8 +1,10 @@
 {
-    "name": "matchbox-chatroom",
+    "name": "skybox-chatroom",
+    "version": "1.0.0",
+    "private": true,
     "scripts": {
-        "build": "cd ../../../.. && bash crates/matchbox-cf-worker/examples/build.sh crates/matchbox-cf-worker/examples/chatroom crates/matchbox-cf-worker/examples/chatroom/ChatRoom.bx ChatRoom '' crates/matchbox-cf-worker/examples/chatroom/state.json",
-        "dev": "npm run build && wrangler dev",
+        "build": "bash build-multi.sh",
+        "dev": "npm run build && wrangler dev --local",
         "deploy": "npm run build && wrangler deploy"
     },
     "devDependencies": {

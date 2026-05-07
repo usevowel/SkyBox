@@ -1,0 +1,12 @@
+{
+    "name": "{{appName}}",
+    "private": true,
+    "scripts": {
+        "build": "bash {{buildScript}} . src/{{listenerClass}}.bx {{listenerClass}}",
+        "dev": "npm run build && wrangler dev --local",
+        "deploy": "npm run build && wrangler deploy"
+    },
+    "devDependencies": {
+        "wrangler": "^4.0.0"
+    }
+}

@@ -1,0 +1,125 @@
+/**
+ *  MessageRouter — Routes incoming messages to command handlers
+ *
+ *  Uses a text-based command protocol (not JSON) since
+ *  deserializeJSON is unavailable on WASM.
+ *
+ *  Commands:
+ *    help              — Show available commands
+ *    echo <text>       — Echo back the text
+ *    count             — Show connection count
+ *    ping              — Respond with pong
+ *    greet <name>      — Greet someone by name
+ */
+class handlers.MessageRouter {
+
+    /**
+     *  Route a message to the appropriate handler
+     *
+     *  @message The raw incoming message
+     *  @channel The WebSocket channel
+     */
+    function route( required string message, required channel ) {
+        var parts    = listToArray( message, " " );
+        var cmd      = lcase( trim( parts[ 1 ] ?: "" ) );
+        var args     = [];
+        if ( arrayLen( parts ) > 1 ) {
+            // Collect all args after the command
+            for ( var i = 2; i <= arrayLen( parts ); i = i + 1 ) {
+                arrayAppend( args, parts[ i ] );
+            }
+        }
+
+        if ( cmd == "help" ) {
+            handleHelp( channel );
+        } else if ( cmd == "echo" ) {
+            handleEcho( args, channel );
+        } else if ( cmd == "count" ) {
+            handleCount( channel );
+        } else if ( cmd == "ping" ) {
+            handlePing( channel );
+        } else if ( cmd == "greet" ) {
+            handleGreet( args, channel );
+        } else {
+            channel.sendJson( {
+                "type"    : "error",
+                "message" : "Unknown command: " & cmd,
+                "hint"    : "Try: help, echo <text>, count, ping, greet <name>"
+            } );
+        }
+    }
+
+    /**
+     *  Show available commands
+     */
+    private function handleHelp( required channel ) {
+        channel.sendJson( {
+            "type"     : "help",
+            "commands" : [
+                "help",
+                "echo <text>",
+                "count",
+                "ping",
+                "greet <name>"
+            ]
+        } );
+    }
+
+    /**
+     *  Echo back the user's text
+     */
+    private function handleEcho( required array args, required channel ) {
+        var text = arrayToList( args, " " );
+        if ( text.len() == 0 ) {
+            channel.sendJson( {
+                "type"    : "error",
+                "message" : "Usage: echo <text>"
+            } );
+            return;
+        }
+        channel.sendJson( {
+            "type" : "echo",
+            "text" : text
+        } );
+    }
+
+    /**
+     *  Show connection count
+     */
+    private function handleCount( required channel ) {
+        var count = variables.connectionCount ?: 0;
+        channel.sendJson( {
+            "type"  : "count",
+            "value" : count
+        } );
+    }
+
+    /**
+     *  Respond to a ping
+     */
+    private function handlePing( required channel ) {
+        channel.sendJson( {
+            "type" : "pong",
+            "time" : "now"
+        } );
+    }
+
+    /**
+     *  Greet someone by name
+     */
+    private function handleGreet( required array args, required channel ) {
+        var name = arrayToList( args, " " );
+        if ( name.len() == 0 ) {
+            channel.sendJson( {
+                "type"    : "error",
+                "message" : "Usage: greet <name>"
+            } );
+            return;
+        }
+        channel.sendJson( {
+            "type"    : "greeting",
+            "message" : "Hello, " & name & "! Welcome to SkyBox!"
+        } );
+    }
+
+}
