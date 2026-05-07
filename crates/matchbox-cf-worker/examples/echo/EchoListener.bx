@@ -1,0 +1,21 @@
+// ── EchoListener ────────────────────────────────────────────────────
+// Minimal WebSocket listener that echoes back every message.
+//
+// deploy: cd examples/echo && npm run deploy
+// test:   wscat -c ws://localhost:8787/ws
+//         > hello
+//         < echo:hello
+
+class EchoListener {
+    function onConnect(required channel) {
+        channel.sendMessage("welcome to EchoServer!");
+    }
+
+    function onMessage(required message, required channel) {
+        channel.sendMessage("echo:" & message);
+    }
+
+    function onClose(required channel) {
+        // nothing to clean up
+    }
+}

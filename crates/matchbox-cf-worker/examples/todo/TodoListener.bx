@@ -1,0 +1,110 @@
+class TodoListener {
+    function onConnect(required channel) {
+        variables.todos = (variables.todos ?: []);
+        variables.nextId = (variables.nextId ?: 1);
+        variables.connectedClients = (variables.connectedClients ?: 0) + 1;
+        channel.sendJson({"type":"state","todos":variables.todos,"total":arrayLen(variables.todos),"connectedClients":variables.connectedClients});
+        channel.broadcastJson({"type":"clientJoined","connectedClients":variables.connectedClients});
+    }
+
+    function onMessage(required message, required channel) {
+        variables.todos = (variables.todos ?: []);
+        variables.nextId = (variables.nextId ?: 1);
+        variables.connectedClients = (variables.connectedClients ?: 0);
+        var parts = listToArray(message, " ");
+        var cmd = lcase(trim(parts[1] ?: ""));
+
+        if (cmd == "help" || cmd == "") {
+            channel.sendJson({"type":"help","commands":[
+                {"cmd":"add TEXT","desc":"Add a todo item"},
+                {"cmd":"done ID","desc":"Mark todo as complete"},
+                {"cmd":"undone ID","desc":"Mark todo as incomplete"},
+                {"cmd":"del ID","desc":"Delete a todo item"},
+                {"cmd":"list","desc":"List all todos"},
+                {"cmd":"clear","desc":"Clear completed todos"},
+                {"cmd":"help","desc":"Show this help"}]});
+            return;
+        }
+
+        if (cmd == "add") {
+            var text = "";
+            for (var i = 2; i <= arrayLen(parts); i = i + 1) {
+                if (i > 2) text = text & " ";
+                text = text & parts[i];
+            }
+            text = trim(text);
+            if (len(text) == 0) {
+                channel.sendJson({"type":"error","message":"Provide text for the todo"}); return;
+            }
+            var todo = {"id":variables.nextId,"text":text,"completed":false};
+            arrayAppend(variables.todos, todo);
+            variables.nextId = variables.nextId + 1;
+            channel.broadcastJson({"type":"added","todo":todo,"total":arrayLen(variables.todos)});
+            return;
+        }
+
+        // For done/undone/del, compare with string-coerced ID
+        var idStr = trim(parts[2] ?: "");
+
+        if (cmd == "done") {
+            for (var i = 1; i <= arrayLen(variables.todos); i = i + 1) {
+                if (variables.todos[i].id & "" == idStr) {
+                    variables.todos[i].completed = true;
+                    channel.broadcastJson({"type":"updated","todo":variables.todos[i]});
+                    return;
+                }
+            }
+            channel.sendJson({"type":"error","message":"Todo not found"});
+            return;
+        }
+
+        if (cmd == "undone") {
+            for (var i = 1; i <= arrayLen(variables.todos); i = i + 1) {
+                if (variables.todos[i].id & "" == idStr) {
+                    variables.todos[i].completed = false;
+                    channel.broadcastJson({"type":"updated","todo":variables.todos[i]});
+                    return;
+                }
+            }
+            channel.sendJson({"type":"error","message":"Todo not found"});
+            return;
+        }
+
+        if (cmd == "del") {
+            for (var i = 1; i <= arrayLen(variables.todos); i = i + 1) {
+                if (variables.todos[i].id & "" == idStr) {
+                    var removed = variables.todos[i];
+                    arrayDeleteAt(variables.todos, i);
+                    channel.broadcastJson({"type":"deleted","id":removed.id,"text":removed.text,"total":arrayLen(variables.todos)});
+                    return;
+                }
+            }
+            channel.sendJson({"type":"error","message":"Todo not found"});
+            return;
+        }
+
+        if (cmd == "list") {
+            channel.sendJson({"type":"result","action":"list","total":arrayLen(variables.todos),"todos":variables.todos});
+            return;
+        }
+
+        if (cmd == "clear") {
+            var newTodos = [];
+            var removed = 0;
+            for (var i = 1; i <= arrayLen(variables.todos); i = i + 1) {
+                if (!variables.todos[i].completed) { arrayAppend(newTodos, variables.todos[i]); }
+                else { removed = removed + 1; }
+            }
+            variables.todos = newTodos;
+            channel.broadcastJson({"type":"cleared","removed":removed,"total":arrayLen(variables.todos)});
+            return;
+        }
+
+        channel.sendJson({"type":"error","message":"Unknown command. Send 'help'"});
+    }
+
+    function onClose(required channel) {
+        variables.connectedClients = max((variables.connectedClients ?: 1) - 1, 0);
+        channel.broadcastJson({"type":"clientLeft","connectedClients":variables.connectedClients});
+    }
+}

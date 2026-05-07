@@ -1,0 +1,20 @@
+{
+  "name": "matchbox-moonphase",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SkyBox MatchBox demo: Moon Phase Calculator on Cloudflare Workers",
+  "scripts": {
+    "build": "bash ../build.sh . MoonPhaseListener.bx MoonPhaseListener",
+    "build:state": "bash ../build.sh . MoonPhaseListener.bx MoonPhaseListener",
+    "build:verbose": "bash ../build.sh . MoonPhaseListener.bx MoonPhaseListener 2>&1",
+    "clean": "rm -rf dist bindgen wasm_glue.js worker.wasm",
+    "test": "npm run test:workerd",
+    "test:workerd": "npx workerd serve test_moonphase.capnp & sleep 4 && curl -sf http://localhost:8790/ && kill %1 2>/dev/null; wait 2>/dev/null",
+    "dev": "npx wrangler dev --port 8787 --local",
+    "deploy": "npx wrangler deploy",
+    "link:wasm": "ln -sf dist/worker.wasm worker.wasm"
+  },
+  "devDependencies": {
+    "ws": "^8.0.0"
+  }
+}

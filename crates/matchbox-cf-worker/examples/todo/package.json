@@ -1,0 +1,11 @@
+{
+    "name": "matchbox-todo",
+    "scripts": {
+        "build": "cd ../../../.. && bash crates/matchbox-cf-worker/examples/build.sh crates/matchbox-cf-worker/examples/todo crates/matchbox-cf-worker/examples/todo/TodoListener.bx TodoListener",
+        "dev": "npm run build && wrangler dev",
+        "deploy": "npm run build && wrangler deploy"
+    },
+    "devDependencies": {
+        "wrangler": "^4.0.0"
+    }
+}

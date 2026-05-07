@@ -1,0 +1,88 @@
+class RomanNumeralListener {
+    function onConnect(required channel) {
+        channel.sendJson({"type":"welcome","service":"Roman Numeral Converter","instructions":'Send "toint MMXXV", "sort III IX V II", or "help"'});
+    }
+
+    function onMessage(required message, required channel) {
+        var parts = listToArray(message, " ");
+        var cmd = lcase(trim(parts[1] ?: ""));
+
+        if (cmd == "help" || cmd == "") {
+            channel.sendJson({"type":"help","commands":[
+                {"cmd":"toint ROMAN","desc":"Convert Roman numeral to integer"},
+                {"cmd":"sort ROMAN1 ROMAN2 ...","desc":"Sort Roman numerals"},
+                {"cmd":"help","desc":"Show this help"}]});
+            return;
+        }
+
+        if (cmd == "toint") {
+            var roman = trim(parts[2] ?: "");
+            if (len(roman) == 0) {
+                channel.sendJson({"type":"error","message":"Provide a Roman numeral"}); return;
+            }
+            var result = romanToInt(roman);
+            if (result == 0) {
+                channel.sendJson({"type":"error","message":"Invalid Roman numeral"}); return;
+            }
+            channel.sendJson({"type":"result","action":"toint","input":roman,"output":result});
+            return;
+        }
+
+        if (cmd == "sort") {
+            if (arrayLen(parts) < 3) {
+                channel.sendJson({"type":"error","message":"Provide numerals to sort"}); return;
+            }
+            var values = [];
+            for (var i = 2; i <= arrayLen(parts); i = i + 1) { arrayAppend(values, parts[i]); }
+            var sorted = sortRomanNumerals(values);
+            channel.sendJson({"type":"result","action":"sort","input":values,"output":sorted});
+            return;
+        }
+
+        channel.sendJson({"type":"error","message":"Unknown command. Send 'help'"});
+    }
+
+    function onClose(required channel) {}
+
+    function getVal(required c) {
+        if (c == "I") return 1;
+        if (c == "V") return 5;
+        if (c == "X") return 10;
+        if (c == "L") return 50;
+        if (c == "C") return 100;
+        if (c == "D") return 500;
+        if (c == "M") return 1000;
+        return 0;
+    }
+
+    function romanToInt(required s) {
+        var str = trim(s);
+        if (len(str) == 0) return 0;
+        var total = 0;
+        var prev = 0;
+        for (var i = len(str); i >= 1; i = i - 1) {
+            var c = mid(str, i, 1);
+            var val = getVal(c);
+            if (val == 0) return 0;
+            if (val < prev) { total = total - val; } else { total = total + val; }
+            prev = val;
+        }
+        return total;
+    }
+
+    function sortRomanNumerals(required arr) {
+        var pairs = [];
+        for (var i = 1; i <= arrayLen(arr); i = i + 1) {
+            var num = romanToInt(arr[i]);
+            if (num > 0) { arrayAppend(pairs, {"original":arr[i],"value":num}); }
+        }
+        for (var i = 1; i <= arrayLen(pairs); i = i + 1) {
+            for (var j = i + 1; j <= arrayLen(pairs); j = j + 1) {
+                if (pairs[j].value < pairs[i].value) { var tmp = pairs[i]; pairs[i] = pairs[j]; pairs[j] = tmp; }
+            }
+        }
+        var result = [];
+        for (var i = 1; i <= arrayLen(pairs); i = i + 1) { arrayAppend(result, pairs[i].original); }
+        return result;
+    }
+}

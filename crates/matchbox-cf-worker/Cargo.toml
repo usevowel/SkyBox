@@ -1,0 +1,32 @@
+[package]
+name = "matchbox-cf-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+postcard = { version = "1.0", features = ["alloc", "use-std"] }
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+getrandom = { version = "0.2", features = ["js"], optional = true }
+
+matchbox_vm = { path = "../../vendor/matchbox/crates/matchbox-vm", default-features = false }
+matchbox_compiler = { path = "../../vendor/matchbox/crates/matchbox-compiler" }
+
+[dev-dependencies]
+matchbox_compiler = { path = "../../vendor/matchbox/crates/matchbox-compiler" }
+
+[features]
+default = []
+js = ["wasm-bindgen", "js-sys", "getrandom/js", "matchbox_vm/js"]
+js-host-abi = []
+
+[[test]]
+name = "websocket_test"
+path = "tests/websocket_test.rs"

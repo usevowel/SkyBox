@@ -1,0 +1,99 @@
+// ── Shared Counter ─────────────────────────────────────────────────
+// Demonstrates shared state across connections with broadcast.
+// Each connection can increment, decrement, or reset a shared counter.
+
+class SharedCounter {
+    function configure() {
+        variables.count = 0;
+        variables.history = [];
+        variables.connectedClients = 0;
+    }
+
+    function onConnect(required channel) {
+        variables.connectedClients = variables.connectedClients + 1;
+        channel.sendJson({
+            "type": "state",
+            "count": variables.count,
+            "connectedClients": variables.connectedClients
+        });
+        channel.broadcastJson({
+            "type": "clientJoined",
+            "connectedClients": variables.connectedClients
+        });
+    }
+
+    function onMessage(required message, required channel) {
+        // Try to parse as JSON command
+        var cmd = message;
+        try {
+            cmd = deserializeJSON(message);
+        } catch(e) {
+            // Treat raw text as an increment
+            cmd = { "action": "increment" };
+        }
+
+        var action = cmd.action ?: "increment";
+        var delta = cmd.delta ?: 1;
+        var userId = channel.getId();
+
+        if (action == "increment") {
+            variables.count = variables.count + delta;
+        } else if (action == "decrement") {
+            variables.count = variables.count - delta;
+        } else if (action == "reset") {
+            variables.count = 0;
+        } else if (action == "set") {
+            variables.count = cmd.value ?: 0;
+        } else if (action == "get") {
+            channel.sendJson({
+                "type": "state",
+                "count": variables.count,
+                "connectedClients": variables.connectedClients
+            });
+            return;
+        } else {
+            channel.sendJson({
+                "type": "error",
+                "message": "Unknown action: " & action
+            });
+            return;
+        }
+
+        // Record history
+        var entry = {
+            "action": action,
+            "userId": userId,
+            "newCount": variables.count,
+            "timestamp": now()
+        };
+        arrayAppend(variables.history, entry);
+        if (arrayLen(variables.history) > 50) {
+            arrayDeleteAt(variables.history, 1);
+        }
+
+        // Broadcast updated state to everyone
+        channel.broadcastJson({
+            "type": "update",
+            "count": variables.count,
+            "action": action,
+            "userId": userId,
+            "delta": delta,
+            "connectedClients": variables.connectedClients
+        });
+    }
+
+    function onClose(required channel) {
+        variables.connectedClients = variables.connectedClients - 1;
+        channel.broadcastJson({
+            "type": "clientLeft",
+            "connectedClients": variables.connectedClients
+        });
+    }
+}
+
+import boxlang.web;
+
+app = web.server();
+listener = new SharedCounter();
+listener.configure();
+app.enableWebSockets("/ws", listener);

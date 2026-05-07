@@ -1,0 +1,64 @@
+class MoonPhaseListener {
+    function onConnect(required channel) {
+        variables.visits = (variables.visits ?: 0) + 1;
+        var phase = samplePhase(variables.visits);
+        channel.sendJson({"type":"welcome","service":"Moon Phase Calculator","phase":phase,"phaseName":getPhaseName(phase),"instructions":'Send "now", "list", or "help"'});
+    }
+
+    function onMessage(required message, required channel) {
+        var msg = trim(message);
+        var msg_lc = lcase(msg);
+
+        if (msg_lc == "help" || msg_lc == "") {
+            channel.sendJson({"type":"help","commands":[
+                {"cmd":"now","desc":"Get a sample moon phase"},
+                {"cmd":"list","desc":"List all moon phase names"},
+                {"cmd":"help","desc":"Show this help"}]});
+            return;
+        }
+
+        if (msg_lc == "now") {
+            var phase = samplePhase(variables.visits);
+            channel.sendJson({"type":"result","phase":phase,"phaseName":getPhaseName(phase),"illumination":getIllumination(phase)});
+            return;
+        }
+
+        if (msg_lc == "list") {
+            var phases = [];
+            var names = ["New Moon","Waxing Crescent","First Quarter","Waxing Gibbous","Full Moon","Waning Gibbous","Last Quarter","Waning Crescent"];
+            var phaseVals = [0.0,0.15,0.25,0.35,0.50,0.65,0.75,0.85];
+            for (var i = 1; i <= arrayLen(names); i = i + 1) {
+                arrayAppend(phases,{"name":names[i],"atPhase":phaseVals[i]});
+            }
+            channel.sendJson({"type":"result","action":"list","phases":phases});
+            return;
+        }
+
+        channel.sendJson({"type":"error","message":"Unknown command. Send 'help'"});
+    }
+
+    function onClose(required channel) {}
+
+    function samplePhase(required visitNum) {
+        var steps = [0.05,0.15,0.25,0.35,0.45,0.50,0.55,0.65,0.75,0.85,0.95];
+        var idx = ((visitNum - 1) % arrayLen(steps)) + 1;
+        return steps[idx];
+    }
+
+    function getPhaseName(required phase) {
+        if (phase < 0.03 || phase >= 0.97) return "New Moon";
+        if (phase < 0.22) return "Waxing Crescent";
+        if (phase < 0.28) return "First Quarter";
+        if (phase < 0.47) return "Waxing Gibbous";
+        if (phase < 0.53) return "Full Moon";
+        if (phase < 0.72) return "Waning Gibbous";
+        if (phase < 0.78) return "Last Quarter";
+        return "Waning Crescent";
+    }
+
+    function getIllumination(required phase) {
+        var diff = phase - 0.5;
+        if (diff < 0) diff = 0 - diff;
+        return round((1 - 2 * diff) * 100);
+    }
+}

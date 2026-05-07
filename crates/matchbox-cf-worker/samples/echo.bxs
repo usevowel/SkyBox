@@ -1,0 +1,25 @@
+// ── Echo Server ────────────────────────────────────────────────────
+// Minimal SocketBox-style WebSocket server that echoes messages.
+// Connect via: wss://your-worker.workers.dev/ws
+//   → receives: "welcome to EchoServer!"
+//   → send "ping" → receives: "echo:ping"
+
+class EchoServer {
+    function onConnect(required channel) {
+        channel.sendMessage("welcome to EchoServer!");
+    }
+
+    function onMessage(required message, required channel) {
+        channel.sendMessage("echo:" & message);
+    }
+
+    function onClose(required channel) {
+        // nothing to clean up
+    }
+}
+
+import boxlang.web;
+
+app = web.server();
+listener = new EchoServer();
+app.enableWebSockets("/ws", listener);

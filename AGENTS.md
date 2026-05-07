@@ -56,6 +56,47 @@ bd close <id>         # Complete work
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
 
+### Persistent Memory (`bd remember`)
+
+Beads has a built-in memory system for project knowledge that survives across sessions:
+
+```bash
+bd remember "text"                     # Store a memory (auto-generated key)
+bd remember "text" --key my-key        # Store with custom key
+bd recall my-key                       # Retrieve full content by key
+bd memories                            # List all memory keys
+bd memories <search>                   # Search memories by keyword
+bd forget my-key                       # Delete a memory
+```
+
+**Rule of thumb**: Knowledge goes in memories, work goes in issues.
+- Use `bd remember` for: architecture decisions, BIF workarounds, design patterns, config notes
+- Use `bd create` for: tasks, bugs, features, epics to implement
+- Memories auto-inject into every session via `bd prime`
+
+### Skills Integration
+
+Beads integrates with AI agent skills via the MCP ecosystem:
+- **beads-mcp** (`pip install beads-mcp`) — MCP server exposing all bd commands as structured tools
+- **beads-skill** (github.com/mrf/beads-skill) — Claude Code skill with `/beads:*` slash commands and Project Manager agent
+- **Agent Skills platform** — Community skills at agent-skills.md
+
+The CLI + hooks approach (used here) is recommended over MCP for shell-based agents — it uses ~1-2k tokens vs 10-50k for MCP schemas.
+
+### Recommended Skills
+
+Install these skills globally via the Vercel skills CLI for a better agent experience:
+
+```bash
+npx skills add https://github.com/vercel-labs/skills --skill find-skills --global
+npx skills add https://github.com/different-ai/openwork --skill opencode-primitives --global
+```
+
+| Skill | Description |
+|-------|-------------|
+| **find-skills** | Helps agents discover and install the right skill for any task. Use when asking "how do I do X" or "find a skill for X". |
+| **opencode-primitives** | Reference for OpenCode skills, plugins, MCP servers, and config-driven behavior. Essential for developing new skills or customizing OpenCode integration. |
+
 ## Session Completion
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.

@@ -1,0 +1,11 @@
+{
+    "name": "matchbox-chatroom",
+    "scripts": {
+        "build": "cd ../../../.. && bash crates/matchbox-cf-worker/examples/build.sh crates/matchbox-cf-worker/examples/chatroom crates/matchbox-cf-worker/examples/chatroom/ChatRoom.bx ChatRoom '' crates/matchbox-cf-worker/examples/chatroom/state.json",
+        "dev": "npm run build && wrangler dev",
+        "deploy": "npm run build && wrangler deploy"
+    },
+    "devDependencies": {
+        "wrangler": "^4.0.0"
+    }
+}

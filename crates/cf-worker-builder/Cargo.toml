@@ -1,0 +1,13 @@
+[package]
+name = "cf-worker-builder"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+postcard = { version = "1.0", features = ["alloc", "use-std"] }
+
+matchbox_compiler = { path = "../../vendor/matchbox/crates/matchbox-compiler" }
+matchbox_vm = { path = "../../vendor/matchbox/crates/matchbox-vm", default-features = false }

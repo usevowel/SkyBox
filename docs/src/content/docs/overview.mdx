@@ -1,0 +1,67 @@
+---
+title: SkyBox — MatchBox CF Worker
+description: BoxLang WebSockets on Cloudflare Workers + Durable Objects
+template: splash
+hero:
+  tagline: Run SocketBox-style BoxLang WebSocket applications on Cloudflare Workers with near-zero cold start, automatic hibernation, and full Hibernation API access.
+  actions:
+    - text: Get Started
+      link: /getting-started/quickstart/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/ortus-solutions/matchbox
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+	<Card title="Quick Start" icon="rocket">
+		Write a BoxLang listener, build the WASM, and deploy to Cloudflare in minutes.
+	</Card>
+	<Card title="Architecture" icon="magnifier">
+		Understand how the BoxLang VM runs inside a Durable Object with the Hibernation API.
+	</Card>
+	<Card title="WASM BIF Guide" icon="star">
+		Which BoxLang BIFs work on WASM and which need workarounds — with code examples.
+	</Card>
+	<Card title="8 Demo Apps" icon="code">
+		Fully-tested demo applications: echo, counter, chatroom, moonphase, romannumeral, jsonfmt, textanalyzer, todo.
+	</Card>
+	<Card title="Testing" icon="test">
+		Test with workerd (no Cloudflare account) or wrangler dev. CI-ready.
+	</Card>
+	<Card title="Deploy" icon="globe">
+		Deploy to Cloudflare Workers with a single command. WebSocket-native.
+	</Card>
+</CardGrid>
+
+## Project Structure
+
+```
+crates/matchbox-cf-worker/
+├── Cargo.toml                  # Crate config (cdylib + rlib, WASM target)
+├── src/
+│   ├── lib.rs                  # Module declarations
+│   ├── types.rs                # Core types (WebSocketConfig, RequestData, CalloutMessage)
+│   ├── channel.rs              # CfWebSocketChannelObject (BxNativeObject impl)
+│   ├── do_adapter.rs           # DoState + CalloutBridge implementations
+│   ├── wasm_exports.rs         # #[wasm_bindgen] exports
+│   └── wasm_metadata.rs        # WASM custom section read/write
+├── shell/
+│   ├── mcf-worker.js           # Cloudflare Worker + DO entry point
+│   └── wrangler.toml           # Template wrangler config
+├── examples/
+│   ├── build.sh                # Build pipeline script
+│   ├── echo/                   # Basic echo server
+│   ├── counter/                # Stateful counter
+│   ├── chatroom/               # Multi-client chat
+│   ├── moonphase/              # Moon phase calculator
+│   ├── romannumeral/           # Roman numeral converter
+│   ├── jsonfmt/                # JSON structural validator
+│   ├── textanalyzer/           # Word/sentence frequency analysis
+│   └── todo/                   # Collaborative todo list
+└── tests/
+    └── websocket_test.rs       # Rust-native test suite
+```

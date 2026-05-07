@@ -1,0 +1,128 @@
+// ── Room Manager ───────────────────────────────────────────────────
+// A room management system where one listener handles multiple rooms.
+// Clients connect to /ws?room=lobby and are isolated per room.
+// Demonstrates query parameter parsing, path-based routing,
+// and per-room state management within a single listener.
+
+class RoomManager {
+    function configure() {
+        // rooms[roomName] = { "count": N, "members": {}, "history": [] }
+        variables.rooms = {};
+    }
+
+    function getRoom(required channel) {
+        var room = channel.getHTTPHeader("x-room", "lobby");
+        // Also check query param: /ws?room=foo
+        var url = channel.getUrl();
+        if (findNoCase("room=", url)) {
+            var idx = findNoCase("room=", url) + 5;
+            var end = idx;
+            while (end <= len(url) && mid(url, end, 1) != "&" && mid(url, end, 1) != " ") {
+                end = end + 1;
+            }
+            room = mid(url, idx, end - idx);
+        }
+        return urlDecode(room);
+    }
+
+    function ensureRoom(required roomName) {
+        if (!structKeyExists(variables.rooms, roomName)) {
+            variables.rooms[roomName] = {
+                "count": 0,
+                "members": {},
+                "history": []
+            };
+        }
+    }
+
+    function onConnect(required channel) {
+        var roomName = getRoom(channel);
+        ensureRoom(roomName);
+        var room = variables.rooms[roomName];
+        var userId = channel.getId();
+
+        room.count = room.count + 1;
+        room.members[userId] = {
+            "id": userId,
+            "joined": now(),
+            "ip": channel.getHTTPHeader("cf-connecting-ip", "unknown"),
+            "userAgent": channel.getHTTPHeader("user-agent", "unknown")
+        };
+
+        channel.sendJson({
+            "type": "welcome",
+            "room": roomName,
+            "userId": userId,
+            "memberCount": room.count,
+            "members": room.members
+        });
+
+        channel.broadcastJson({
+            "type": "join",
+            "room": roomName,
+            "userId": userId,
+            "memberCount": room.count
+        });
+    }
+
+    function onMessage(required message, required channel) {
+        var roomName = getRoom(channel);
+        ensureRoom(roomName);
+        var room = variables.rooms[roomName];
+        var userId = channel.getId();
+
+        var payload = message;
+        try {
+            payload = deserializeJSON(message);
+        } catch(e) {
+            payload = { "type": "text", "body": message };
+        }
+
+        // Only broadcast within the same room
+        // We use a room-scoped approach: prefix message with room ID
+        // The broadcast goes to all connections, but we can't filter
+        // per-room without separate DO instances.
+        //
+        // For true room isolation, create one DO per room using
+        // env.WEBSOCKET_DO.idFromName(roomName) in the Worker.
+
+        var chatMsg = {
+            "type": "chat",
+            "room": roomName,
+            "userId": userId,
+            "payload": payload,
+            "timestamp": now()
+        };
+
+        arrayAppend(room.history, chatMsg);
+        if (arrayLen(room.history) > 200) {
+            arrayDeleteAt(room.history, 1);
+        }
+
+        channel.broadcastJson(chatMsg);
+    }
+
+    function onClose(required channel) {
+        var roomName = getRoom(channel);
+        if (structKeyExists(variables.rooms, roomName)) {
+            var room = variables.rooms[roomName];
+            var userId = channel.getId();
+            room.count = max(room.count - 1, 0);
+            structDelete(room.members, userId);
+
+            channel.broadcastJson({
+                "type": "leave",
+                "room": roomName,
+                "userId": userId,
+                "memberCount": room.count
+            });
+        }
+    }
+}
+
+import boxlang.web;
+
+app = web.server();
+listener = new RoomManager();
+listener.configure();
+app.enableWebSockets("/ws", listener);

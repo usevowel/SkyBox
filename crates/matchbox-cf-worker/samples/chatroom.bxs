@@ -1,0 +1,110 @@
+// ── Chat Room ──────────────────────────────────────────────────────
+// Multi-user chat room with broadcast, join/leave notifications,
+// nickname support, and connection tracking.
+
+class ChatRoom {
+    function configure(required roomName) {
+        variables.room = roomName;
+        variables.userCount = 0;
+        variables.users = {};
+        variables.messages = [];
+    }
+
+    function onConnect(required channel) {
+        var userId = channel.getId();
+        variables.userCount = variables.userCount + 1;
+
+        // Store user metadata
+        var userInfo = {
+            "id": userId,
+            "nickname": "User" & variables.userCount,
+            "joined": now()
+        };
+        variables.users[userId] = userInfo;
+
+        // Welcome the new user
+        channel.sendJson({
+            "type": "welcome",
+            "room": variables.room,
+            "userId": userId,
+            "userCount": variables.userCount
+        });
+
+        // Notify everyone
+        channel.broadcastJson({
+            "type": "join",
+            "user": userInfo,
+            "userCount": variables.userCount
+        });
+    }
+
+    function onMessage(required message, required channel) {
+        var userId = channel.getId();
+        var userInfo = variables.users[userId] ?: { "nickname": "Anonymous" };
+
+        // Parse as JSON if possible
+        var payload = {};
+        try {
+            payload = deserializeJSON(message);
+        } catch(e) {
+            payload = { "type": "text", "body": message };
+        }
+
+        var chatMessage = {
+            "type": "chat",
+            "userId": userId,
+            "nickname": userInfo.nickname,
+            "timestamp": now(),
+            "payload": payload
+        };
+
+        // Store recent messages (keep last 100)
+        arrayAppend(variables.messages, chatMessage);
+        if (arrayLen(variables.messages) > 100) {
+            arrayDeleteAt(variables.messages, 1);
+        }
+
+        // Broadcast to everyone (including sender for consistency)
+        channel.broadcastJson(chatMessage);
+    }
+
+    function setNickname(required channel, required newName) {
+        var userId = channel.getId();
+        var oldInfo = variables.users[userId];
+        if (isNull(oldInfo)) {
+            channel.sendMessage("ERROR: not connected");
+            return;
+        }
+        var oldName = oldInfo.nickname;
+        oldInfo.nickname = newName;
+        variables.users[userId] = oldInfo;
+
+        channel.broadcastJson({
+            "type": "nickchange",
+            "userId": userId,
+            "oldName": oldName,
+            "newName": newName
+        });
+    }
+
+    function onClose(required channel) {
+        var userId = channel.getId();
+        var userInfo = variables.users[userId] ?: { "nickname": "Unknown" };
+
+        variables.userCount = variables.userCount - 1;
+        structDelete(variables.users, userId);
+
+        channel.broadcastJson({
+            "type": "leave",
+            "user": userInfo,
+            "userCount": variables.userCount
+        });
+    }
+}
+
+import boxlang.web;
+
+app = web.server();
+listener = new ChatRoom();
+listener.configure("lobby");
+app.enableWebSockets("/ws", listener);
