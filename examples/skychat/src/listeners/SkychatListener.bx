@@ -1,0 +1,581 @@
+class SkychatListener {
+
+    function onConnect(required channel) {
+        var userId = channel.getId();
+        variables.userCount = (variables.userCount ?: 0) + 1;
+        if (isNull(variables.history)) { variables.history = {}; }
+
+        variables.history[userId] = [];
+
+        seedBoxLangFacts();
+
+        channel.sendJson({
+            "type" : "welcome",
+            "userId" : userId
+        });
+
+        channel.sendJson({
+            "type" : "rag_debug_toggle",
+            "totalChunks" : arrayLen(variables.ragChunks ?: [])
+        });
+    }
+
+    function onMessage(required message, required channel) {
+        if (message == "__ping__") {
+            channel.sendMessage("__pong__");
+            return;
+        }
+        var userId = channel.getId();
+        var prompt = trim(mid(message, 1, 2048));
+        if (len(prompt) == 0) { return; }
+
+        variables.history = (variables.history ?: {});
+        if (isNull(variables.history[userId])) { variables.history[userId] = []; }
+
+        var userMsg = variables.history[userId];
+
+        var contextChunks = retrieveContext(prompt);
+        var systemMsg = "You are a helpful, concise assistant. Answer clearly and directly. Use any relevant knowledge facts provided below to enrich your response.";
+        var ragContext = buildRagContext(contextChunks);
+
+        if (len(ragContext) > 0) {
+            systemMsg = systemMsg & "  Knowledge context: " & ragContext;
+        }
+
+        var messages = [];
+        arrayAppend(messages, { "role" : "system", "content" : systemMsg });
+
+        var startIdx = max(1, arrayLen(userMsg) - 10);
+        for (var i = startIdx; i <= arrayLen(userMsg); i = i + 1) {
+            arrayAppend(messages, userMsg[i]);
+        }
+        arrayAppend(messages, { "role" : "user", "content" : prompt });
+
+        channel.sendJson({ "type" : "user_msg", "content" : prompt });
+
+        channel.sendJson({
+            "type" : "rag_debug",
+            "query" : prompt,
+            "matches" : arrayLen(contextChunks),
+            "chunks" : contextChunks
+        });
+
+        arrayAppend(userMsg, { "role" : "user", "content" : prompt });
+        arrayAppend(userMsg, { "role" : "assistant", "content" : "" });
+        if (arrayLen(userMsg) > 30) {
+            arrayDeleteAt(userMsg, 1);
+            arrayDeleteAt(userMsg, 1);
+        }
+
+        openRouterChat("OPENROUTER_API_KEY", messagesToJson(messages), userId, prompt);
+    }
+
+    function onClose(required channel) {
+        var userId = channel.getId();
+        variables.history = (variables.history ?: {});
+        structDelete(variables.history, userId);
+    }
+
+    function onHttpGet(required struct request) {
+        if (request.path == "/") {
+            return {
+                "status" : 200,
+                "headers" : { "Content-Type" : "text/html; charset=utf-8" },
+                "body" : renderPage()
+            };
+        }
+        return { "status" : 404, "headers" : { "Content-Type" : "text/plain" }, "body" : "Not Found" };
+    }
+
+    private function seedBoxLangFacts() {
+        if (!isNull(variables.ragSeeded) && variables.ragSeeded) { return; }
+        variables.ragSeeded = true;
+
+        variables.ragChunks = [
+            {
+                id : "bl001",
+                keywords : "boxlang scripting language syntax",
+                text : "BoxLang is a modern scripting language. It compiles to WASM and runs on Cloudflare Workers via the MatchBox runtime, which is written in Rust."
+            },
+            {
+                id : "bl002",
+                keywords : "class oop inheritance extends interface",
+                text : "BoxLang supports object-oriented programming with classes, single inheritance via the extends keyword, and interfaces via the implements keyword. Classes can have public and private methods."
+            },
+            {
+                id : "bl003",
+                keywords : "variable scope var function",
+                text : "In BoxLang, local variables are declared with the var keyword. Function arguments use the required keyword for mandatory parameters. The arguments scope provides access to all passed arguments."
+            },
+            {
+                id : "bl004",
+                keywords : "string concat operator",
+                text : "BoxLang uses the & operator for string concatenation. The len() function returns string length, mid() extracts substrings, trim() removes whitespace, and lcase()/ucase() change case."
+            },
+            {
+                id : "bl005",
+                keywords : "array list append delete sort",
+                text : "BoxLang array functions include arrayAppend() to add elements, arrayDeleteAt() to remove by index, arrayLen() for count, and listToArray() to split strings. Arrays are 1-indexed."
+            },
+            {
+                id : "bl006",
+                keywords : "struct map key value",
+                text : "BoxLang has built-in struct support. Use {} literal syntax for structs. Access values with dot notation or bracket notation. Use structDelete() to remove keys."
+            },
+            {
+                id : "bl007",
+                keywords : "json serialize serializeJSON",
+                text : "BoxLang provides serializeJSON() to convert structs and arrays to JSON strings. Custom objects can define a toJSON() method. JSON member functions like .keyExists() check for key presence."
+            },
+            {
+                id : "bl008",
+                keywords : "websocket send broadcast channel",
+                text : "In MatchBox, WebSocket connections are represented by the channel object. Use channel.sendJson() to send structured messages, channel.getId() for the connection ID, and channel.sendMessage() for raw text."
+            },
+            {
+                id : "bl009",
+                keywords : "matchbox wasm cloudflare worker durable object",
+                text : "MatchBox is a Rust runtime that compiles BoxLang to WebAssembly. It runs inside Cloudflare Workers Durable Objects, handling WebSocket connections via the Hibernation API for stateless, scalable real-time apps."
+            },
+            {
+                id : "bl010",
+                keywords : "openrouter ai chat llm stream",
+                text : "SkyChat uses OpenRouter to access AI chat models. The openRouterChat() BIF sends messages to OpenRouter's free tier and streams responses back to the client WebSocket. Conversation history is managed in-memory."
+            },
+            {
+                id : "bl011",
+                keywords : "if else for while loop control flow",
+                text : "BoxLang supports standard control flow: if/else conditionals, for loops with counters, while loops, and break/continue. Use the var keyword for loop variables."
+            },
+            {
+                id : "bl012",
+                keywords : "function private public return",
+                text : "Functions in BoxLang are declared with the function keyword. Use the private modifier for internal helpers. Return a value with the return statement. Function overloading is not supported."
+            },
+            {
+                id : "bl013",
+                keywords : "rag retrieval augmented generation context",
+                text : "RAG (Retrieval-Augmented Generation) enhances AI responses by retrieving relevant knowledge chunks and injecting them into the prompt. SkyChat uses keyword-based RAG: it extracts keywords from the user query, searches the in-memory chunk store, and adds matching facts as context for the AI."
+            },
+            {
+                id : "bl014",
+                keywords : "d1 database sql query execute",
+                text : "D1 is Cloudflare's serverless SQLite database. MatchBox exposes d1Query() for SELECT statements and d1Execute() for INSERT/UPDATE/DELETE. Both are async BIFs that use the BindingCall bridge to communicate with the JS shell."
+            },
+            {
+                id : "bl015",
+                keywords : "embedding vector similarity semantic search",
+                text : "Semantic search uses vector embeddings to find chunks by meaning rather than keywords. MatchBox supports mxaiEmbed() which calls Cloudflare's AI Workers AI binding (@cf/baai/bge-base-en-v1.5) to generate 768-dimensional embeddings."
+            }
+        ];
+    }
+
+    private array function retrieveContext(required string query) {
+        var keywords = extractKeywords(query);
+        if (arrayLen(keywords) == 0) { return []; }
+
+        var chunks = variables.ragChunks ?: [];
+        var scored = [];
+
+        for (var i = 1; i <= arrayLen(chunks); i = i + 1) {
+            var chunk = chunks[i];
+            var score = matchScore(chunk.keywords & " " & chunk.text, keywords);
+            if (score > 0) {
+                arrayAppend(scored, {
+                    id : chunk.id,
+                    text : chunk.text,
+                    score : score,
+                    matchedKeywords : formatMatchedKeywords(chunk.keywords, keywords)
+                });
+            }
+        }
+
+        for (var i = 1; i < arrayLen(scored); i = i + 1) {
+            for (var j = i + 1; j <= arrayLen(scored); j = j + 1) {
+                if (scored[i].score < scored[j].score) {
+                    var tmp = scored[i];
+                    scored[i] = scored[j];
+                    scored[j] = tmp;
+                }
+            }
+        }
+
+        if (arrayLen(scored) > 5) {
+            var top = [];
+            for (var i = 1; i <= 5; i = i + 1) {
+                arrayAppend(top, scored[i]);
+            }
+            return top;
+        }
+        return scored;
+    }
+
+    private array function extractKeywords(required string text) {
+        var words = listToArray(lcase(trim(text)), " ");
+        var stopWords = "the a an is in it of to be and or for on at by with from as are was were has have had do does did but not so if can all will would could should may about into over after before between under above below";
+        var result = [];
+
+        for (var i = 1; i <= arrayLen(words); i = i + 1) {
+            var w = words[i];
+            if (len(w) < 3) continue;
+            var isStop = false;
+            var sw = listToArray(stopWords, " ");
+            for (var j = 1; j <= arrayLen(sw); j = j + 1) {
+                if (w == sw[j]) { isStop = true; break; }
+            }
+            if (!isStop) {
+                arrayAppend(result, w);
+            }
+        }
+
+        return result;
+    }
+
+    private numeric function matchScore(required string haystack, required array keywords) {
+        var haystack = lcase(haystack);
+        var score = 0;
+        for (var i = 1; i <= arrayLen(keywords); i = i + 1) {
+            if (findIn(haystack, keywords[i])) {
+                score = score + 1;
+            }
+        }
+        return score;
+    }
+
+    private boolean function findIn(required string haystack, required string needle) {
+        var hLen = len(haystack);
+        var nLen = len(needle);
+        if (nLen > hLen) return false;
+        for (var i = 1; i <= hLen - nLen + 1; i = i + 1) {
+            if (mid(haystack, i, nLen) == needle) return true;
+        }
+        return false;
+    }
+
+    private string function formatMatchedKeywords(required string chunkKeywords, required array queryKeywords) {
+        var ck = lcase(chunkKeywords);
+        var matched = [];
+        for (var i = 1; i <= arrayLen(queryKeywords); i = i + 1) {
+            if (findIn(ck, queryKeywords[i])) {
+                arrayAppend(matched, queryKeywords[i]);
+            }
+        }
+        return joinWithCommas(matched);
+    }
+
+    private string function joinWithCommas(required array items) {
+        var result = "";
+        for (var i = 1; i <= arrayLen(items); i = i + 1) {
+            if (len(result) > 0) { result = result & ", "; }
+            result = result & items[i];
+        }
+        return result;
+    }
+
+    private string function buildRagContext(required array chunks) {
+        if (arrayLen(chunks) == 0) return "";
+        var result = "";
+        for (var i = 1; i <= arrayLen(chunks); i = i + 1) {
+            if (len(result) > 0) { result = result & " "; }
+            result = result & "- " & chunks[i].text;
+        }
+        return result;
+    }
+
+    private string function messagesToJson(required array messages) {
+        var parts = [];
+        for (var i = 1; i <= arrayLen(messages); i = i + 1) {
+            var m = messages[i];
+            var content = m.content;
+            content = escapeForJson(content);
+            arrayAppend(parts, '{"role":"' & m.role & '","content":"' & content & '"}');
+        }
+        var result = "";
+        for (var i = 1; i <= arrayLen(parts); i = i + 1) {
+            if (i > 1) { result = result & ","; }
+            result = result & parts[i];
+        }
+        return "[" & result & "]";
+    }
+
+    private string function escapeForJson(required string str) {
+        var result = "";
+        for (var i = 1; i <= len(str); i = i + 1) {
+            var c = mid(str, i, 1);
+            if (c >= " " && c <= "~" && c != '"' && c != "\\") {
+                result = result & c;
+            } else if (c == '"') {
+                result = result & '\\"';
+            } else if (c == "\\") {
+                result = result & "\\\\";
+            } else {
+                result = result & "?";
+            }
+        }
+        return result;
+    }
+
+    private function renderPage() {
+        return '<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkyChat AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+##ragPanel::-webkit-scrollbar { width: 4px; }
+##ragPanel::-webkit-scrollbar-track { background: transparent; }
+##ragPanel::-webkit-scrollbar-thumb { background: ##374151; border-radius: 2px; }
+</style>
+</head>
+<body class="bg-gray-950 text-gray-100 h-screen flex flex-col font-sans antialiased">
+<header class="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800 shrink-0">
+  <div class="flex items-center gap-3">
+    <h1 class="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500">SkyChat</h1>
+    <span id="statusBadge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-800 text-gray-400">
+      <span id="statusDot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+      <span id="statusText">Disconnected</span>
+    </span>
+  </div>
+</header>
+<main id="messages" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 max-w-3xl mx-auto w-full"></main>
+<footer class="border-t border-gray-800 bg-gray-900 shrink-0">
+  <div class="max-w-3xl mx-auto w-full px-4 py-3">
+    <form id="chatForm" class="flex gap-2">
+      <input id="msgInput" type="text" placeholder="Ask about BoxLang, RAG, or anything..." autofocus class="flex-1 px-4 py-3 rounded-xl bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-500 text-sm">
+      <button type="submit" class="px-5 py-3 rounded-xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors">Send</button>
+    </form>
+  </div>
+</footer>
+
+<button id="ragFab" class="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-gray-800 border border-gray-700 text-yellow-400 hover:border-cyan-700 hover:text-cyan-400 hover:bg-gray-750 transition-all shadow-2xl flex items-center justify-center cursor-pointer" title="RAG Debug">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-7 h-7">
+    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+  </svg>
+</button>
+
+<div id="ragModal" class="fixed bottom-24 right-6 z-50 hidden w-80 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden" style="max-height: 360px;">
+  <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between bg-gray-850 shrink-0">
+    <span class="text-xs font-medium text-gray-300">RAG Debug</span>
+    <span class="text-xs text-gray-500" id="ragStats">0 chunks</span>
+  </div>
+  <div id="ragPanel" class="overflow-y-auto text-xs font-mono text-gray-400 p-3 space-y-1" style="max-height: 300px;"></div>
+</div>
+
+<script>
+(()=>{
+  const params = new URLSearchParams(location.search);
+  const sessionParam = params.get("session") || "";
+  const cid = crypto.randomUUID();
+  const baseWsUrl = (location.protocol === "https:" ? "wss:" : "ws:") + "//" + location.host + "?cid=" + cid + (sessionParam ? "&session=" + encodeURIComponent(sessionParam) : "");
+  const baseSseUrl = (location.protocol === "https:" ? "https:" : "http:") + "//" + location.host + "/?cid=" + cid;
+  const msgEl = document.getElementById("messages");
+  const input = document.getElementById("msgInput");
+  const form = document.getElementById("chatForm");
+  const btn = form.querySelector("button");
+  const dot = document.getElementById("statusDot");
+  const stxt = document.getElementById("statusText");
+  const ragFab = document.getElementById("ragFab");
+  const ragModal = document.getElementById("ragModal");
+  const ragPanel = document.getElementById("ragPanel");
+  const ragStats = document.getElementById("ragStats");
+
+  let ws = null;
+  let es = null;
+  let aiBubble = null;
+  let sessionId = null;
+  let ragOn = false;
+  let totalChunks = 0;
+  let reconnectAttempt = 0;
+  let reconnectTimer = null;
+  let pingTimer = null;
+  let sendQueue = [];
+  let sseConnected = false;
+
+  function setStatus(online) {
+    dot.className = "w-2 h-2 rounded-full " + (online ? "bg-green-500" : "bg-gray-600");
+    stxt.textContent = online ? "Connected" : "Disconnected";
+  }
+
+  function addMsg(type, text) {
+    const d = document.createElement("div");
+    d.className = type === "user" ? "flex justify-end" : "flex justify-start";
+    const inner = document.createElement("div");
+    if (type === "user") {
+      inner.className = "max-w-[80%] px-4 py-2.5 rounded-2xl bg-cyan-700 text-white text-sm leading-relaxed";
+    } else {
+      inner.className = "max-w-[80%] px-4 py-2.5 rounded-2xl bg-gray-800 text-gray-100 text-sm leading-relaxed";
+    }
+    inner.textContent = text;
+    d.appendChild(inner);
+    msgEl.appendChild(d);
+    msgEl.scrollTop = msgEl.scrollHeight;
+  }
+
+  function startAiBubble() {
+    const d = document.createElement("div");
+    d.className = "flex justify-start";
+    const inner = document.createElement("div");
+    inner.className = "max-w-[80%] px-4 py-2.5 rounded-2xl bg-gray-800 text-gray-100 text-sm leading-relaxed";
+    const think = document.createElement("span");
+    think.className = "text-gray-400 italic flex items-center gap-2";
+    const sp = document.createElement("span");
+    sp.className = "inline-block w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin";
+    think.append("Thinking ", sp);
+    inner.appendChild(think);
+    const content = document.createElement("span");
+    content.className = "hidden";
+    inner.appendChild(content);
+    d.appendChild(inner);
+    msgEl.appendChild(d);
+    msgEl.scrollTop = msgEl.scrollHeight;
+    aiBubble = { container: inner, thinking: think, content };
+  }
+
+  function addAiChunk(text) {
+    if (!aiBubble) return;
+    aiBubble.thinking.className = "hidden";
+    aiBubble.content.className = "";
+    aiBubble.content.textContent += text;
+    msgEl.scrollTop = msgEl.scrollHeight;
+  }
+
+  function finishAiBubble() {
+    aiBubble = null;
+    btn.disabled = false;
+    input.disabled = false;
+    input.focus();
+  }
+
+  function addRagEntry(query, matches, chunks) {
+    const q = query.length > 40 ? query.substring(0, 40) + "..." : query;
+    const header = document.createElement("div");
+    header.className = "text-cyan-400 font-semibold mt-2 first:mt-0";
+    header.textContent = "[" + q + "] " + matches + " hit(s)";
+    ragPanel.appendChild(header);
+    if (chunks) {
+      chunks.forEach(function(c) {
+        const line = document.createElement("div");
+        line.className = "text-gray-500 pl-2";
+        line.textContent = c.id + " [" + c.score + "] " + c.matchedKeywords;
+        ragPanel.appendChild(line);
+      });
+    }
+    ragPanel.scrollTop = ragPanel.scrollHeight;
+  }
+
+  function startPing() {
+    clearInterval(pingTimer);
+    pingTimer = setInterval(function() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send("__ping__");
+      }
+    }, 25000);
+  }
+
+  function connectSSE() {
+    if (es) es.close();
+    es = new EventSource(baseSseUrl);
+    es.addEventListener("welcome", function(e) {
+      const m = JSON.parse(e.data);
+      sessionId = m.userId;
+      sseConnected = true;
+    });
+    es.addEventListener("user_msg", function(e) {
+      const m = JSON.parse(e.data);
+      addMsg("user", m.content);
+    });
+    es.addEventListener("ai_start", function(e) {
+      startAiBubble();
+      btn.disabled = true;
+      input.disabled = true;
+    });
+    es.addEventListener("ai_chunk", function(e) {
+      const m = JSON.parse(e.data);
+      addAiChunk(m.content);
+    });
+    es.addEventListener("ai_done", function() {
+      finishAiBubble();
+    });
+    es.addEventListener("error", function(e) {
+      if (e.data) {
+        const m = JSON.parse(e.data);
+        addMsg("system", m.body);
+      }
+      finishAiBubble();
+    });
+    es.addEventListener("rag_debug", function(e) {
+      const m = JSON.parse(e.data);
+      if (ragOn) addRagEntry(m.query, m.matches, m.chunks);
+    });
+    es.addEventListener("rag_debug_toggle", function(e) {
+      const m = JSON.parse(e.data);
+      totalChunks = m.totalChunks;
+      ragStats.textContent = totalChunks + " chunks";
+    });
+    es.addEventListener("open", function() {
+      connectWS();
+    });
+  }
+
+  function connectWS() {
+    if (ws) {
+      try { ws.close(); } catch (e) {}
+      ws = null;
+    }
+    ws = new WebSocket(baseWsUrl);
+    ws.addEventListener("open", function() {
+      setStatus(true);
+      reconnectAttempt = 0;
+      startPing();
+      while (sendQueue.length) {
+        var queued = sendQueue.shift();
+        try { ws.send(queued); } catch (e) { sendQueue.unshift(queued); break; }
+      }
+    });
+    ws.addEventListener("close", function() {
+      setStatus(false);
+      clearInterval(pingTimer);
+      var delay = Math.min(1000 * Math.pow(2, reconnectAttempt), 30000);
+      reconnectAttempt++;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = function(){ connectSSE(); };
+      setTimeout(reconnectTimer, delay);
+    });
+    ws.addEventListener("message", function(e) {
+      if (e.data === "__pong__") return;
+    });
+    ws.addEventListener("error", function() {});
+  }
+
+  ragFab.addEventListener("click", function() {
+    ragOn = !ragOn;
+    ragModal.classList.toggle("hidden", !ragOn);
+    if (ragOn && totalChunks > 0 && ragPanel.children.length === 0) {
+      const info = document.createElement("div");
+      info.className = "text-gray-500";
+      info.textContent = "RAG debug \u2014 " + totalChunks + " chunks loaded";
+      ragPanel.appendChild(info);
+    }
+  });
+
+  form.addEventListener("submit", function(e) {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text || btn.disabled) return;
+    input.value = "";
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(text);
+    } else {
+      sendQueue.push(text);
+    }
+  });
+
+  connectSSE();
+})();
+</script>
+</body>
+</html>';
+    }
+}

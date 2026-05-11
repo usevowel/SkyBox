@@ -60,20 +60,22 @@ globalThis.__skybox_get_section = getWasmSection;
 globalThis.__skybox_send = function (calloutJson) {
     try {
         const msg = JSON.parse(calloutJson);
-        // Try SSE first (primary channel) via global SSE streams
-        const text = msg.text;
-        if (text !== null) {
-            const parsed = JSON.parse(text);
-            const eventType = parsed.type || 'message';
-            const entry = globalSSEStreams.get(msg.connection_id);
-            if (entry) {
-                const sseMsg = `event: ${eventType}\ndata: ${JSON.stringify(parsed)}\n\n`;
-                entry.writer.write(entry.encoder.encode(sseMsg));
-                return JSON.stringify({ success: true });
+        const doInstance = currentDO;
+        // Try SSE first (primary channel) via DO instance streams
+        if (doInstance && doInstance.sseStreams) {
+            const text = msg.text;
+            if (text !== null) {
+                const parsed = JSON.parse(text);
+                const eventType = parsed.type || 'message';
+                const entry = doInstance.sseStreams.get(msg.connection_id);
+                if (entry) {
+                    const sseMsg = `event: ${eventType}\ndata: ${JSON.stringify(parsed)}\n\n`;
+                    entry.writer.write(entry.encoder.encode(sseMsg));
+                    return JSON.stringify({ success: true });
+                }
             }
         }
         // Fall back to WebSocket
-        const doInstance = currentDO;
         if (!doInstance) {
             return JSON.stringify({ success: false, error: 'No active DO context' });
         }
@@ -130,14 +132,15 @@ globalThis.__skybox_binding_call = function (calloutJson) {
     }
 };
 
-// ── Module-level SSE streams ──────────────────────────────────────
-// SSE streams are stored at module level so both the Worker entry
-// point (for SSE creation) and DO callouts (for SSE writes) can
-// access them. In workerd, the Worker and DO share the module scope.
-const globalSSEStreams = new Map();
+// ── SSE on currentDO ──────────────────────────────────────────────
+// SSE streams live on the DO instance (this.sseStreams) because the
+// Worker and DO run in separate workerd isolates and cannot share a
+// module-level Map. All SSE write helpers go through currentDO.
 
 function globalSSESend(connectionId, eventType, data) {
-    const entry = globalSSEStreams.get(connectionId);
+    const doInstance = currentDO;
+    if (!doInstance || !doInstance.sseStreams) return false;
+    const entry = doInstance.sseStreams.get(connectionId);
     if (!entry) return false;
     try {
         const msg = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -145,73 +148,18 @@ function globalSSESend(connectionId, eventType, data) {
         return true;
     } catch (err) {
         console.error('globalSSESend error:', err);
-        globalSSEStreams.delete(connectionId);
+        doInstance.sseStreams.delete(connectionId);
         return false;
     }
-}
-
-function handleGlobalSSE(request, url) {
-    const cid = url.searchParams.get('cid');
-    if (!cid) {
-        return new Response('Missing cid parameter', { status: 400 });
-    }
-
-    const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
-    const encoder = new TextEncoder();
-
-    const existing = globalSSEStreams.get(cid);
-    if (existing) {
-        try { existing.writer.close(); } catch (_) {}
-    }
-
-    globalSSEStreams.set(cid, { writer, encoder });
-
-    try {
-        writer.write(encoder.encode('event: connected\ndata: {}\n\n'));
-    } catch (err) {
-        console.error('SSE initial write error:', err);
-    }
-
-    request.signal.addEventListener('abort', () => {
-        const entry = globalSSEStreams.get(cid);
-        if (entry && entry.writer === writer) {
-            globalSSEStreams.delete(cid);
-        }
-    });
-
-    return new Response(readable, {
-        status: 200,
-        headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
 }
 
 // ── Worker Entry Point ──────────────────────────────────────────────
 
 export default {
     async fetch(request, env, ctx) {
-        // Return plain text for ALL requests to verify Worker runs
-        return new Response(`Worker received: ${request.method} ${request.url}`, {
-            headers: { 'Content-Type': 'text/plain' },
-        });
-
-        // Route WebSocket upgrades to the DO
-        const isWebSocket = request.headers.get('Upgrade') === 'websocket';
-
-        if (isWebSocket) {
-            const doId = env.WEBSOCKET_DO.idFromName('default');
-            const stub = env.WEBSOCKET_DO.get(doId);
-            return stub.fetch(request);
-        }
-
-        return new Response('Not Found', {
-            status: 404,
-            headers: { 'Content-Type': 'text/plain' },
-        });
+        const doId = env.WEBSOCKET_DO.idFromName('default');
+        const stub = env.WEBSOCKET_DO.get(doId);
+        return stub.fetch(request);
     },
 };
 
@@ -224,6 +172,7 @@ export class MatchBoxWebSocketDO {
         this.initialized = false;
         this.pendingAsyncOps = new Map();
         this.nextAsyncOpId = 1;
+        this.sseStreams = new Map();
         this.ctx.blockConcurrencyWhile(async () => {
             await this.initWasm();
             await this.restoreState();
@@ -294,6 +243,12 @@ export class MatchBoxWebSocketDO {
             return this.handleWebSocketUpgrade(request);
         }
 
+        // SSE: EventSource sends Accept: text/event-stream
+        const accept = request.headers.get('Accept') || '';
+        if (accept.includes('text/event-stream')) {
+            return this.handleSSE(request);
+        }
+
         // HTTP request → serve via BoxLang onHttpGet
         return this.handleHttpRequest(request);
     }
@@ -349,6 +304,47 @@ export class MatchBoxWebSocketDO {
         } finally {
             currentDO = null;
         }
+    }
+
+    handleSSE(request) {
+        const url = new URL(request.url);
+        const cid = url.searchParams.get('cid');
+        if (!cid) {
+            return new Response('Missing cid parameter', { status: 400 });
+        }
+
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const encoder = new TextEncoder();
+
+        const existing = this.sseStreams.get(cid);
+        if (existing) {
+            try { existing.writer.close(); } catch (_) {}
+        }
+
+        this.sseStreams.set(cid, { writer, encoder });
+
+        try {
+            writer.write(encoder.encode('event: connected\ndata: {}\n\n'));
+        } catch (err) {
+            console.error('SSE initial write error:', err);
+        }
+
+        request.signal.addEventListener('abort', () => {
+            const entry = this.sseStreams.get(cid);
+            if (entry && entry.writer === writer) {
+                this.sseStreams.delete(cid);
+            }
+        });
+
+        return new Response(readable, {
+            status: 200,
+            headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Access-Control-Allow-Origin': '*',
+            },
+        });
     }
 
     async handleWebSocketUpgrade(request) {
@@ -493,6 +489,22 @@ export class MatchBoxWebSocketDO {
     // ── Callout implementations ──
 
     sendToWS(connectionId, text, binary) {
+        // Try SSE first
+        if (text !== null) {
+            try {
+                const parsed = JSON.parse(text);
+                const eventType = parsed.type || 'message';
+                const entry = this.sseStreams.get(connectionId);
+                if (entry) {
+                    const msg = `event: ${eventType}\ndata: ${JSON.stringify(parsed)}\n\n`;
+                    entry.writer.write(entry.encoder.encode(msg));
+                    return;
+                }
+            } catch (_) {
+                // not JSON, fall through to WS
+            }
+        }
+
         for (const ws of this.ctx.getWebSockets()) {
             const att = ws.deserializeAttachment();
             if (att && att.id === connectionId) {
@@ -656,20 +668,34 @@ export class MatchBoxWebSocketDO {
         const connectionId = msg.args.connection_id;
         const messages = msg.args.messages;
         const model = msg.args.model || 'openrouter/free';
+        const self = this;
 
         if (!apiKey) {
             console.error('OpenRouter: no API key in binding', msg.binding_name);
-            globalSSESend(connectionId, 'error', { type: 'error', body: 'AI service not configured' });
-            globalSSESend(connectionId, 'ai_done', { type: 'ai_done' });
+            self.sseSend(connectionId, 'error', { type: 'error', body: 'AI service not configured' });
+            self.sseSend(connectionId, 'ai_done', { type: 'ai_done' });
         } else {
             this.streamOpenRouter(connectionId, messages, model, apiKey).catch(err => {
                 console.error('OpenRouter stream error:', err.message, err.stack);
-                globalSSESend(connectionId, 'error', { type: 'error', body: 'AI response failed: ' + err.message });
-                globalSSESend(connectionId, 'ai_done', { type: 'ai_done' });
+                self.sseSend(connectionId, 'error', { type: 'error', body: 'AI response failed: ' + err.message });
+                self.sseSend(connectionId, 'ai_done', { type: 'ai_done' });
             });
         }
 
         return { success: true, async_id: 0 };
+    }
+
+    sseSend(connectionId, eventType, data) {
+        const entry = this.sseStreams.get(connectionId);
+        if (!entry) return false;
+        try {
+            entry.writer.write(entry.encoder.encode(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`));
+            return true;
+        } catch (err) {
+            console.error('sseSend error:', err);
+            this.sseStreams.delete(connectionId);
+            return false;
+        }
     }
 
     async streamOpenRouter(connectionId, messagesJson, model, apiKey) {
@@ -696,7 +722,7 @@ export class MatchBoxWebSocketDO {
             throw new Error(`OpenRouter HTTP ${response.status}: ${errText}`);
         }
 
-        globalSSESend(connectionId, 'ai_start', { type: 'ai_start' });
+        this.sseSend(connectionId, 'ai_start', { type: 'ai_start' });
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -720,7 +746,7 @@ export class MatchBoxWebSocketDO {
                     const parsed = JSON.parse(data);
                     const content = parsed.choices?.[0]?.delta?.content || '';
                     if (content) {
-                        globalSSESend(connectionId, 'ai_chunk', { type: 'ai_chunk', content });
+                        this.sseSend(connectionId, 'ai_chunk', { type: 'ai_chunk', content });
                     }
                 } catch {
                     // skip unparseable chunks
@@ -728,7 +754,7 @@ export class MatchBoxWebSocketDO {
             }
         }
 
-        globalSSESend(connectionId, 'ai_done', { type: 'ai_done' });
+        this.sseSend(connectionId, 'ai_done', { type: 'ai_done' });
     }
 }
 
