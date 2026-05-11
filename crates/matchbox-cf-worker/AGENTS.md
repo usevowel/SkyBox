@@ -15,6 +15,29 @@ bash examples/build.sh <example-dir> <bx-source> <listener-class> [state-json] [
 | 3 | `cargo run -p cf-worker-builder` | `dist/worker.wasm` (embeds BoxLang bytecode as custom sections) |
 | 4 | Copy JS glue | `wasm_glue.js` (wasm-bindgen output renamed) |
 
+### Static Assets
+
+Multi-file examples (like chatroom) may include a `assets/` directory with CSS, JS, and other static files.
+
+Build flow (via `build-multi.sh`):
+1. Concatenate all `.bx` sources
+2. Copy `assets/` → `dist/assets/` (step 5)
+3. Run standard build pipeline (steps 2-4)
+
+The `[assets]` section in `wrangler.toml` tells Cloudflare to serve files from `dist/assets/` at the edge **before** the Worker runs:
+
+```toml
+[assets]
+directory = "dist/assets"
+```
+
+- Requests to `/css/style.css` serve `dist/assets/css/style.css`
+- Requests to `/js/chat.js` serve `dist/assets/js/chat.js`
+- If an asset doesn't match, the request falls through to the Worker
+- The Worker `fetch()` handler also checks `env.ASSETS.fetch()` as a fallback for programmatic access
+
+**Note:** The shell `wrangler.toml` has `[assets]` commented out by default. Uncomment and set the directory when your app uses static assets. Also, `[wasm_modules]` was removed from the shell — WASM is imported natively via `import wasmModule from './worker.wasm'`.
+
 ## BoxLang Listener Conventions
 
 ### File format
@@ -51,6 +74,38 @@ class MyListener {
   // NOT this:
   variables.romanMap = {"I": 1, "V": 5};  // won't persist!
   ```
+
+### Web UI via `onHttpGet` (since 2026-05-07)
+
+The BoxLang listener can now serve HTML pages directly via an `onHttpGet` method:
+
+```boxlang
+function onHttpGet(required struct request) {
+    // request has: method, path, query, headers, cookies, body, full_url
+    if (request.path == "/") {
+        var html = renderMyPage();
+        return {
+            "status" : 200,
+            "headers" : { "Content-Type" : "text/html; charset=utf-8" },
+            "body" : html
+        };
+    }
+    return {
+        "status" : 404,
+        "headers" : { "Content-Type" : "text/plain" },
+        "body" : "Not Found"
+    };
+}
+```
+
+**Key points:**
+- Returns a **struct** (not a JSON string) — serialization happens in Rust via `bx_to_json()`
+- The JS shell (`mcf-worker.js`) must import `vm_on_http_request` from `wasm_glue.js`
+- The DO's `fetch()` routes: WebSocket upgrade → `handleWebSocketUpgrade()`, HTTP → `handleHttpRequest()`
+- The Worker entry point forwards both WebSocket AND GET / requests to the DO
+- **For CSS/JS, prefer external static assets** served via Cloudflare `[assets]` rather than inline strings in BoxLang — this avoids `#` escaping (`"##"` for hex colors) and JS string escaping issues entirely
+- If you must inline CSS, use `"##"` for hex `#` characters (BoxLang treats `#` as expression delimiter)
+- If you must inline JS, use single-quoted strings with `\` continuation (the `\` at end of lines is literal backslash)
 
 ### Protocol design (text commands, NOT JSON)
 Because `deserializeJSON` is unavailable on WASM, **use text-based command protocols**:
@@ -189,11 +244,20 @@ For tests that modify state:
 2. Check each response in sequence
 3. The DO's `currentDO` is simulated by the global callout functions
 
+## Worker Naming Convention
+
+All Cloudflare Workers must follow the naming convention: **`skybox-<app>`**
+
+Examples:
+- `skybox-chatroom`, `skybox-todo`, `skybox-echo`, `skybox-counter`
+
+The `name` field in `wrangler.toml` must always begin with `skybox-`. This is enforced by convention — all example workers and the CLI scaffolding tools follow this pattern.
+
 ## Wrangler Deploy
 
 ### Configuration
 ```toml
-name = "my-app"
+name = "skybox-app"
 main = "mcf-worker.js"
 compatibility_date = "2025-01-01"
 account_id = "your-account-id"
@@ -215,7 +279,29 @@ new_sqlite_classes = ["MatchBoxWebSocketDO"]
 ### Deploy flow
 ```bash
 npm run build     # Build the WASM
-npx wrangler deploy
+npx wrangler versions upload              # Upload new version (does NOT switch traffic!)
+npx wrangler versions deploy --version-id <id> --percentage 100   # Switch traffic
+```
+
+> **⚠️ Important**: In wrangler v4, `wrangler deploy` only **uploads** a new version but
+> does NOT switch traffic. You MUST run `wrangler versions deploy --version-id <id>
+> --percentage 100` to make it live. Use `wrangler versions list` to see available versions.
+
+### Two-file copy issue
+
+There are **two copies** of `mcf-worker.js`:
+1. **Template**: `crates/matchbox-cf-worker/shell/mcf-worker.js` (canonical source)
+2. **Per-demo copy**: `examples/<demo>/mcf-worker.js` (used by wrangler)
+
+Always copy the template to the demo after editing:
+```bash
+cp -f crates/matchbox-cf-worker/shell/mcf-worker.js examples/<demo>/mcf-worker.js
+```
+
+For per-demo templates (like `crates/matchbox-cf-worker/examples/<demo>/mcf-worker.js`),
+copy to `examples/<demo>/mcf-worker.js`:
+```bash
+cp -f crates/matchbox-cf-worker/examples/<demo>/mcf-worker.js examples/<demo>/mcf-worker.js
 ```
 
 ### Dev flow
@@ -231,9 +317,13 @@ npx wrangler dev --local
 2. Write `MyListener.bx` with your BoxLang class
 3. Copy `shell/mcf-worker.js` to `examples/myapp/mcf-worker.js`
 4. Copy `shell/wrangler.toml` to `examples/myapp/wrangler.toml`, edit app name
+   - Remove `[wasm_modules]` if present (WASM is imported natively)
+   - Add `[assets]` section if you have static CSS/JS files
 5. Create `examples/myapp/package.json` with build/test scripts
-6. Build: `bash examples/build.sh examples/myapp examples/myapp/MyListener.bx MyListener`
-7. Create workerd test files (optional):
+6. If using static assets, create `assets/css/` and `assets/js/` directories with your files
+7. Build: `bash examples/build.sh examples/myapp examples/myapp/MyListener.bx MyListener`
+   - For multi-file builds with assets, use `build-multi.sh` convention (see chatroom example)
+8. Create workerd test files (optional):
    - `test_myapp.js` — ES module with workerd-compatible imports
    - `test_myapp.capnp` — workerd config pointing to the test JS
 

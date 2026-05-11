@@ -90,12 +90,148 @@ Install these skills globally via the Vercel skills CLI for a better agent exper
 ```bash
 npx skills add https://github.com/vercel-labs/skills --skill find-skills --global
 npx skills add https://github.com/different-ai/openwork --skill opencode-primitives --global
+
 ```
 
 | Skill | Description |
 |-------|-------------|
 | **find-skills** | Helps agents discover and install the right skill for any task. Use when asking "how do I do X" or "find a skill for X". |
 | **opencode-primitives** | Reference for OpenCode skills, plugins, MCP servers, and config-driven behavior. Essential for developing new skills or customizing OpenCode integration. |
+| **bx-ai-to-mx-ai** | Port BoxLang AI BIFs to the MatchBox/WASM runtime. Covers conversion levels (pass-through, stub, Rust→JS bridge, pure-BoxLang port), checklist, and key reference files. |
+
+### Skills Worth Creating
+
+These project-specific skills could accelerate development:
+
+| Skill | Purpose |
+|-------|---------|
+| **mcf-worker-js** | Reference for `mcf-worker.js` patterns: callout bridge, SSE management, DO lifecycle, async pause/resume cycle, binding dispatch |
+| **skychat-debugging** | Debugging guide for the skychat demo: SSE vs WS flow, D1 queries, OpenRouter streaming, RAG pipeline |
+| **wrangler-deploy** | Deploy workflow reference: versions upload/deploy, two-file copy issue, routing config, environment variables |
+| **boxlang-bif-scaffold** | Template for creating new BoxLang BIFs: `@BoxBIF` annotation, `invoke()` signature, argument handling, return types |
+
+## Engineering Philosophy: Leverage Before Build
+
+**Default to using existing crates/libraries before writing custom code.** This applies especially to:
+
+- **Rust crates**: Check crates.io for well-maintained, WASM-compatible libraries before writing custom Rust logic. Vector similarity? Check `innr`, `ndarray`, or `ruvector-core` before hand-rolling. Serialization? Use `serde`/`postcard`. Hash? Use `sha2`.
+- **BoxLang modules**: Before implementing new BIFs, check `refs/bx-ai/` — many features (TextChunker, BaseVectorMemory, etc.) exist as pure BoxLang and can be ported with minimal changes.
+- **Cloudflare Workers**: Use `env.AI.run()`, `env.DB.prepare()`, etc. via the JS bridge before adding new Rust BIFs. The DO env bindings are the most direct path.
+- **npm packages**: Prefer existing npm packages over hand-rolling JS shell code.
+
+**When to write custom code:**
+- The crate/library is heavy (e.g., `ndarray` for a 3-line cosine similarity — just write the 3 lines)
+- The crate doesn't compile to WASM
+- The crate adds more complexity than the 50 lines of Rust it would replace
+- There's no crate that fits the use case (e.g., BoxLang BIF scaffolding)
+
+**Rule of thumb**: If a crate solves the problem in 1-2 function calls and is WASM-compatible, use it. If you'd only use 5% of the crate, it's probably lighter to write the code yourself.
+
+## BXAI → MXAI Conversion Workflow
+
+This project ports BoxLang AI (`refs/bx-ai/`) BIFs to the MatchBox/WASM runtime
+as `packages/mx-ai/`. The conversion follows these patterns:
+
+### Conversion Levels
+
+| Level | Description | Examples |
+|-------|-------------|----------|
+| **Pass-through** | BIF works identically on WASM (pure BoxLang, no JVM deps) | `aiDocuments()`, `TextChunker`, `BaseVectorMemory` |
+| **Stub + delegate** | BIF can't run on WASM; stubs with `throw("UnsupportedInMatchBox")` | `aiChat()`, `aiTool()`, `aiAgent()` |
+| **Rust→JS bridge** | BIF implemented in Rust, delegates via `__skybox_binding_call` to JS | `openRouterChat()` — JS does the actual HTTP fetch |
+| **Pure-BoxLang port** | Rewrite JVM-dependent BoxLang in pure .bx (no Java classes, no `createObject`) | `D1VectorMemory`, `TextChunker` |
+
+### Porting Checklist
+
+1. **Check BIF availability**: Does the BIF use `createObject("java:...")`, `new JavaClass()`,
+   closures-as-callables, HTTP requests, or file I/O? If yes, it needs a delegate or stub.
+2. **Check `refs/bx-ai/`**: Find the reference implementation. The API signature must be preserved.
+3. **Choose conversion level** using the table above.
+4. **For Rust→JS bridge**: Register a new case in `handleBindingCall()` in `mcf-worker.js`,
+   add a new `handleXxx()` method on the DO, and implement the Rust-side BIF in `src/bifs.rs`.
+5. **For pure-BoxLang port**: Copy the `.bx` file, strip Java imports/`createObject` calls,
+   replace `httpRequest()` with the callout bridge, replace `fileRead`/`fileWrite` with
+   WASM-compatible alternatives.
+6. **Name**: Use the same BIF name and `@BoxBIF` annotation. The module loads BIFs from
+   `bifs/` automatically.
+7. **Test endpoint**: `openRouterChat()` delegates to JS → verify with E2E AI chat test.
+8. **Deploy**: `npx wrangler versions upload && npx wrangler versions deploy --version-id <id> --percentage 100`
+
+### Key Architectural Differences
+
+| Feature | BXAI (JVM BoxLang) | MXAI (MatchBox/WASM) |
+|---------|-------------------|---------------------|
+| HTTP requests | `httpRequest()` BIF, `createObject("java:...")` | JS callout bridge (`__skybox_binding_call` → DO's `handleBindingCall()`) |
+| Database | JDBC datasources | D1 / Turso bindings via JS callout |
+| AI models | `aiChat()` with provider config | `openRouterChat()` Rust→JS bridge, or `env.AI.run()` for Workers AI |
+| Streaming | SSE from JVM BoxLang server | SSE from DO instance (`this.sseStreams`), or WebSocket push |
+| Closures as callables | Full support | Limited — closures can't be passed through WASM boundary easily |
+| File system | `fileRead`/`fileWrite` | Not available (Cloudflare Workers has no persistent FS) |
+| Caches | `cachePut()`/`cacheGet()` | Durable Objects storage |
+| AI Embeddings | `aiEmbed()` via provider config | `env.AI.run('@cf/baai/bge-base-en-v1.5', { text: input })` via JS bridge |
+| Tools/Agents | Full `aiTool()`/`aiAgent()` runtime | Stubs — tools need custom Rust→JS bridge implementation |
+
+### Adding a New Agentic Tool-Calling BIF (Next Work Item)
+
+To port `aiTool.bx` from BXAI to MXAI:
+
+1. Design the Rust-side tool registry in `src/bifs.rs` — tools are name+description+closure pairs
+2. Add a `handleToolCall` method on the DO in `mcf-worker.js` — executes the tool's JS function
+3. Wire `__skybox_binding_call` dispatch for tool actions (register, call, list tools)
+4. Implement the `aiTool.bx` BoxLang BIF that creates a tool struct and registers it via callout
+5. Add `sendMessage()` fallback for tool results (since tools return to the AI, not the user)
+6. Update `streamOpenRouter()` to include tool definitions in the OpenRouter API call
+
+## Web App Testing with agent-browser
+
+Use [agent-browser](https://github.com/vercel-labs/agent-browser) for automated browser testing of SkyBox web apps.
+
+### Installation
+
+```bash
+npm install -g agent-browser
+agent-browser install    # Downloads Chrome for Testing
+```
+
+### Loading Skills
+
+Load the agent-browser skills at the start of each testing session:
+
+```bash
+agent-browser skills get core           # Workflows, common patterns, troubleshooting
+agent-browser skills get core --full    # Full command reference + templates
+agent-browser skills get dogfood        # Exploratory testing / QA / bug hunts
+```
+
+### Testing Pattern (Multi-Agent)
+
+For testing WebSocket-based apps with multiple users, use separate `--session` flags:
+
+```bash
+# Session 1: User A opens the app
+agent-browser --session userA open http://localhost:8787/
+
+# Session 2: User B opens the app  
+agent-browser --session userB open http://localhost:8787/
+
+# Interact via each session independently
+agent-browser --session userA snapshot
+agent-browser --session userB click @e1
+```
+
+### Chatroom Testing Quick Start
+
+```bash
+# Terminal 1: Start the app
+cd crates/matchbox-cf-worker/examples/chatroom
+npm run dev
+
+# Terminal 2: Test with agent-browser  
+agent-browser --session alice open http://localhost:8787/
+agent-browser --session bob open http://localhost:8787/
+```
+
+The `--session` flag creates isolated browser instances (separate cookies, storage, state) — each one acts as a distinct user.
 
 ## SkyBox CLI Module (`skybox-cli/`)
 
@@ -132,6 +268,13 @@ skybox-cli/
 | `box skybox dev` | Start wrangler dev server |
 | `box skybox deploy` | Deploy to Cloudflare Workers |
 | `box skybox new <name> <demo>` | Scaffold a demo app from templates |
+
+### Worker Naming Convention
+
+All Cloudflare Workers follow the naming convention: **`skybox-<app>`**
+- Examples: `skybox-chatroom`, `skybox-todo`, `skybox-echo`
+- The `name` field in `wrangler.toml` must always begin with `skybox-`
+- The `box skybox init` command automatically prepends `skybox-` when scaffolding new projects
 
 ### Available Demos (for `skybox new`)
 
