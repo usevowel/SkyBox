@@ -178,6 +178,20 @@ export default {
             return handleDocPage(url, env);
         }
 
+        // SSE endpoint: route to DO
+        if (path === '/events') {
+            const doId = env.WEBSOCKET_DO.idFromName('default');
+            const stub = env.WEBSOCKET_DO.get(doId);
+            return stub.fetch(request);
+        }
+
+        // WebSocket upgrade: route to DO
+        if (request.headers.get('Upgrade') === 'websocket') {
+            const doId = env.WEBSOCKET_DO.idFromName('default');
+            const stub = env.WEBSOCKET_DO.get(doId);
+            return stub.fetch(request);
+        }
+
         // Serve the static SPA shell for root
         if (path === '/' || path === '/index.html') {
             return serveSPA(request, env);

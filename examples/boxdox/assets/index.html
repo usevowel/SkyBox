@@ -174,7 +174,7 @@ a:hover { text-decoration:underline; }
 (function() {
   const cid = crypto.randomUUID();
   const wsUrl = (location.protocol==="https:"?"wss:":"ws:")+"//"+location.host+"?cid="+cid;
-  const sseUrl = (location.protocol==="https:"?"https:":"http:")+"//"+location.host+"/?cid="+cid;
+  const sseUrl = (location.protocol==="https:"?"https:":"http:")+"//"+location.host+"/events?cid="+cid;
   let ws = null, es = null, aiBubble = null, pingTimer = null;
   let chatHistory = [];
 
