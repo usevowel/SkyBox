@@ -160,19 +160,22 @@ export default {
         const url = new URL(request.url);
         const path = url.pathname;
 
-        // R2: serve doc content files (markdown, images, assets)
+        // Serve content and nav-tree from static assets
         if (path.startsWith('/content/')) {
+            const assetPath = path === '/content/' ? '/content/index.html' : path;
+            if (env.ASSETS) return env.ASSETS.fetch(new Request(new URL(assetPath, url.origin)));
             return serveR2(request, env, path.replace('/content/', 'content/'));
         }
 
-        // R2: serve nav tree JSON
+        // Nav tree from assets
         if (path === '/api/nav-tree') {
+            if (env.ASSETS) return env.ASSETS.fetch(new Request(new URL('/nav-tree.json', url.origin)));
             return serveR2(request, env, 'nav-tree.json', 'application/json');
         }
 
-        // API: page content from R2 (read markdown, return JSON with frontmatter)
+        // Doc page: read markdown from assets binding, parse, return JSON
         if (path === '/api/page') {
-            return handleDocPage(request, env, url);
+            return handleDocPage(url, env);
         }
 
         // Serve the static SPA shell for root
@@ -220,9 +223,10 @@ async function serveR2(request, env, key, contentType) {
 }
 
 /**
- * Handle /api/page?path=... — read markdown from R2, parse frontmatter, return JSON.
+ * Handle /api/page?path=... — read markdown from assets binding,
+ * parse frontmatter, return JSON.
  */
-async function handleDocPage(request, env, url) {
+async function handleDocPage(url, env) {
     const docPath = url.searchParams.get('path') || '';
     if (!docPath) {
         return new Response(JSON.stringify({ error: 'Missing path parameter' }), {
@@ -230,30 +234,28 @@ async function handleDocPage(request, env, url) {
         });
     }
 
-    if (!env.DOCS_BUCKET) {
-        return new Response(JSON.stringify({ error: 'R2 bucket not configured' }), {
-            status: 500, headers: { 'Content-Type': 'application/json' },
-        });
-    }
-
-    // Try exact path, then README.md for directories, then .md extension
     const tryPaths = [
-        'content/' + docPath,
-        'content/' + docPath + '/README.md',
-        'content/' + docPath + '.md',
-        'content/' + docPath + '.mdx',
-        'content/' + docPath.replace(/\/$/, '') + '/README.md',
+        '/content/' + docPath,
+        '/content/' + docPath + '/README.md',
+        '/content/' + docPath + '.md',
+        '/content/' + docPath + '.mdx',
+        '/content/' + docPath.replace(/\/$/, '') + '/README.md',
     ];
 
-    for (const r2key of tryPaths) {
-        const obj = await env.DOCS_BUCKET.get(r2key);
-        if (obj) {
-            const raw = await obj.text();
-            const parsed = parseDocPage(raw, docPath, r2key);
-            return new Response(JSON.stringify(parsed), {
-                status: 200, headers: { 'Content-Type': 'application/json' },
-            });
-        }
+    for (const p of tryPaths) {
+        try {
+            const assetReq = new Request(p);
+            const resp = await env.ASSETS.fetch(assetReq);
+            if (resp.status === 200) {
+                const raw = await resp.text();
+                if (raw && raw.length > 0) {
+                    const parsed = parseDocPage(raw, docPath, p);
+                    return new Response(JSON.stringify(parsed), {
+                        status: 200, headers: { 'Content-Type': 'application/json' },
+                    });
+                }
+            }
+        } catch (_) {}
     }
 
     return new Response(JSON.stringify({ error: 'Document not found', path: docPath }), {

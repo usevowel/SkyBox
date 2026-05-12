@@ -280,54 +280,63 @@ a:hover { text-decoration:underline; }
   };
 
   function loadDocById(id) {
-    $("content").innerHTML = "<div class=loading><div class=spinner></div><span>Loading...</span></div>";
-    fetch("/api/page?path=" + encodeURIComponent(id))
-      .then(function(r){ return r.json(); })
-      .then(function(data) {
-        if (data.error) { $("content").innerHTML = "<p style='padding:40px;color:var(--text-3);'>" + data.error + "</p>"; return; }
-        renderDoc(data);
-      })
-      .catch(function(err) {
-        $("content").innerHTML = "<p style='padding:40px;color:var(--red);'>Error: " + err.message + "</p>";
-      });
+    window.loadDoc(id);
   }
 
   window.loadDoc = function(path) {
     $("content").innerHTML = "<div class=loading><div class=spinner></div><span>Loading...</span></div>";
-    fetch("/api/page?path=" + encodeURIComponent(path))
-      .then(function(r){ return r.json(); })
-      .then(function(data) {
-        if (data.error) { $("content").innerHTML = "<p style='padding:40px;color:var(--text-3);'>" + data.error + "</p>"; return; }
-        renderDoc(data);
+    var contentPath = path;
+    if (!contentPath.endsWith(".md") && !contentPath.endsWith(".mdx")) contentPath = contentPath + ".md";
+    fetch("/content/" + contentPath)
+      .then(function(r) {
+        if (!r.ok) {
+          if (!contentPath.endsWith("README.md")) {
+            var dirPath = contentPath.replace(/\/[^/]+$/, "/README.md");
+            return fetch("/content/" + dirPath);
+          }
+          throw new Error("Page not found");
+        }
+        return r;
+      })
+      .then(function(r) {
+        if (!r.ok) throw new Error("Page not found");
+        return r.text();
+      })
+      .then(function(raw) {
+        var title = "";
+        var content = raw;
+        var sections = [];
+        if (raw.startsWith("---")) {
+          var endIdx = raw.indexOf("---", 3);
+          if (endIdx > 3) {
+            content = raw.slice(endIdx + 3).trim();
+          }
+        }
+        var h1Match = content.match(/^#\s+(.+)/m);
+        if (h1Match) title = h1Match[1].trim();
+        document.title = title ? (title + " - BoxDox") : "BoxDox - BoxLang Docs";
+        var html = marked.parse(content);
+        $("content").innerHTML = html;
+        var headingRe = /^(#{2,3})\s+(.+)$/gm;
+        var match;
+        var tocHtml = "";
+        while ((match = headingRe.exec(content)) !== null) {
+          var anchor = match[2].trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+          tocHtml += "<a href='#" + anchor + "' class='toc-h" + match[1].length + "'>" + esc(match[2].trim()) + "</a>";
+        }
+        $("tocLinks").innerHTML = tocHtml;
         setActiveNav(path);
+        if (location.hash) {
+          setTimeout(function() {
+            var el = document.getElementById(location.hash.slice(1));
+            if (el) el.scrollIntoView({ behavior: "smooth" });
+          }, 100);
+        }
       })
       .catch(function(err) {
         $("content").innerHTML = "<p style='padding:40px;color:var(--red);'>Error: " + err.message + "</p>";
       });
   };
-
-  function renderDoc(data) {
-    var html = "";
-    if (data.frontmatter && data.frontmatter.description) {
-      html += "<p style='color:var(--text-2);margin-bottom:24px;font-size:14px;'>" + esc(data.frontmatter.description) + "</p>";
-    }
-    html += marked.parse(data.content);
-    $("content").innerHTML = html;
-    document.title = data.title ? (data.title + " - BoxDox") : "BoxDox - BoxLang Docs";
-    var tocHtml = "";
-    if (data.sections) {
-      data.sections.forEach(function(s) {
-        tocHtml += "<a href='#" + s.anchor + "' class='toc-h" + s.level + "'>" + esc(s.text) + "</a>";
-      });
-    }
-    $("tocLinks").innerHTML = tocHtml;
-    if (location.hash) {
-      setTimeout(function() {
-        var el = document.getElementById(location.hash.slice(1));
-        if (el) el.scrollIntoView({ behavior: "smooth" });
-      }, 100);
-    }
-  }
 
   function setActiveNav(path) {
     document.querySelectorAll(".nav-item").forEach(function(el) {
