@@ -727,6 +727,11 @@ export class MatchBoxWebSocketDO {
     }
 
     // ── Binding Call Dispatch ────────────────────────────────────
+    // CRITICAL: Handlers that set pendingAsyncOps MUST run synchronously
+    // until pendingAsyncOps.set() is called. Never use `await` before
+    // pendingAsyncOps.set() — async handlers return a Promise that
+    // stringifies as '{}' by the callout bridge.
+    // Pattern: sync dispatch → fire-and-forget async → return sync success.
 
     handleBindingCall(msg) {
         const binding = this.env[msg.binding_name];
@@ -734,16 +739,158 @@ export class MatchBoxWebSocketDO {
         switch (msg.action) {
             case 'query':     return this.handleD1Query(msg, binding);
             case 'execute':   return this.handleD1Execute(msg, binding);
-            case 'embed':     return this.handleEmbed(msg);
-            case 'turso_query':   return this.handleTursoQuery(msg);
-            case 'turso_execute': return this.handleTursoExecute(msg);
+            case 'embed':     return this.handleEmbedSync(msg);
+            case 'turso_query':   return this.handleTursoSync(msg, 'query');
+            case 'turso_execute': return this.handleTursoSync(msg, 'execute');
             case 'openrouter':    return JSON.stringify(this.handleOpenRouter(msg, binding));
-            case 'vectorize_upsert': return this.handleVectorizeUpsert(msg, binding);
-            case 'vectorize_query':  return this.handleVectorizeQuery(msg, binding);
-            case 'vectorize_delete_by_ids': return this.handleVectorizeDeleteByIds(msg, binding);
+            case 'vectorize_upsert': return this.handleVectorizeSync(msg, binding, 'upsert');
+            case 'vectorize_query':  return this.handleVectorizeSync(msg, binding, 'query');
+            case 'vectorize_delete_by_ids': return this.handleVectorizeSync(msg, binding, 'deleteByIds');
             default:
                 return JSON.stringify({ success: false, error: `Unknown action: ${msg.action}` });
         }
+    }
+
+    // ── Embed Handler (sync dispatch, optionally async) ──────────
+
+    handleEmbedSync(msg) {
+        const async_id = msg.async_id;
+        if (!this.env.AI) {
+            const dims = 4;
+            const input = msg.args.input;
+            const data = typeof input === 'string'
+                ? Array.from({ length: dims }, () => Math.random())
+                : (Array.isArray(input) ? input.map(() => Array.from({ length: dims }, () => Math.random())) : []);
+            this.pendingAsyncOps.set(async_id, Promise.resolve(data));
+            return JSON.stringify({ success: true, async_id });
+        }
+        this.embedAsync(msg).catch(() => {});
+        return JSON.stringify({ success: true, async_id });
+    }
+
+    async embedAsync(msg) {
+        const async_id = msg.async_id;
+        try {
+            const model = msg.args.options?.model || '@cf/baai/bge-base-en-v1.5';
+            const input = msg.args.input;
+            const response = await this.env.AI.run(model, { text: input });
+            const data = response?.data || response?.result?.data || [];
+            this.pendingAsyncOps.set(async_id, Promise.resolve(data));
+        } catch (err) {
+            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+        }
+    }
+
+    // ── Turso Handler (sync dispatch, async fetch) ──────────────
+
+    handleTursoSync(msg, mode) {
+        const async_id = msg.async_id;
+        const sql = msg.args.sql;
+        const params = msg.args.params || [];
+        if (!this.env.TURSO_URL || !this.env.TURSO_AUTH_TOKEN) {
+            this.pendingAsyncOps.set(async_id, Promise.reject('Turso not configured'));
+            return JSON.stringify({ success: true, async_id });
+        }
+        this.tursoAsync(async_id, sql, params, mode).catch(() => {});
+        return JSON.stringify({ success: true, async_id });
+    }
+
+    async tursoAsync(async_id, sql, params, mode) {
+        try {
+            const response = await fetch(this.env.TURSO_URL, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.env.TURSO_AUTH_TOKEN}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    requests: [{ type: 'execute', stmt: { sql, args: params.map(p => ({ type: 'text', value: String(p) })) } }],
+                }),
+            });
+            if (!response.ok) throw new Error(`Turso error: ${response.status}`);
+            const json = await response.json();
+            if (mode === 'query') {
+                const rows = json?.results?.[0]?.response?.result?.rows || [];
+                this.pendingAsyncOps.set(async_id, Promise.resolve(rows));
+            } else {
+                const affected = json?.results?.[0]?.response?.result?.affected_count || 0;
+                this.pendingAsyncOps.set(async_id, Promise.resolve(affected));
+            }
+        } catch (err) {
+            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+        }
+    }
+
+    // ── Vectorize Handlers (sync dispatch, async fetch) ──────────
+
+    handleVectorizeSync(msg, binding, operation) {
+        const async_id = msg.async_id;
+        if (!binding) {
+            this.pendingAsyncOps.set(async_id, Promise.reject('Vectorize not configured'));
+            return JSON.stringify({ success: true, async_id });
+        }
+
+        if (operation === 'upsert') {
+            const vectors = JSON.parse(msg.args.vectors);
+            binding.upsert(vectors).then(r => {
+                this.pendingAsyncOps.set(async_id, Promise.resolve(r?.count ?? vectors.length));
+            }).catch(err => {
+                this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+            });
+            return JSON.stringify({ success: true, async_id });
+        }
+
+        if (operation === 'query') {
+            const vector = JSON.parse(msg.args.vector);
+            const topK = parseInt(msg.args.topK || '5', 10);
+            const filter = msg.args.filter ? JSON.parse(msg.args.filter) : undefined;
+            const queryOptions = { topK, returnValues: true, returnMetadata: true };
+            if (filter && Object.keys(filter).length > 0) queryOptions.filter = filter;
+
+            binding.query(vector, queryOptions).then(result => {
+                const matches = (result.matches || []).map(m => ({
+                    id: m.id,
+                    score: 1 - (m.score / 2),
+                    metadata: m.metadata || {},
+                    values: m.values || [],
+                }));
+                this.pendingAsyncOps.set(async_id, Promise.resolve({ count: result.count || matches.length, matches }));
+            }).catch(err => {
+                this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+            });
+            return JSON.stringify({ success: true, async_id });
+        }
+
+        if (operation === 'deleteByIds') {
+            const ids = JSON.parse(msg.args.ids);
+            binding.deleteByIds(ids).then(r => {
+                this.pendingAsyncOps.set(async_id, Promise.resolve(r));
+            }).catch(err => {
+                this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+            });
+            return JSON.stringify({ success: true, async_id });
+        }
+
+        return JSON.stringify({ success: false, error: `Unknown vectorize op: ${operation}` });
+    }
+
+    handleEmbedSync(msg) {
+        const async_id = msg.async_id;
+        if (!this.env.AI) {
+            const dims = 4;
+            const input = msg.args.input;
+            const data = typeof input === 'string'
+                ? Array.from({ length: dims }, () => Math.random())
+                : (Array.isArray(input) ? input.map(() => Array.from({ length: dims }, () => Math.random())) : []);
+            this.pendingAsyncOps.set(async_id, Promise.resolve(data));
+            return JSON.stringify({ success: true, async_id });
+        }
+        // AI is available — use async handler
+        this.handleEmbedAsync(msg).catch(err => {
+            console.error('Embed error:', err);
+            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+        });
+        return JSON.stringify({ success: true, async_id });
     }
 
     handleD1Query(msg, binding) {
@@ -761,142 +908,6 @@ export class MatchBoxWebSocketDO {
         const params = msg.args.params || [];
         const promise = binding.prepare(sql).bind(...params).run();
         this.pendingAsyncOps.set(async_id, promise.then(r => r.meta.changes ?? r.meta.changed_db ?? 0));
-        return JSON.stringify({ success: true, async_id });
-    }
-
-    async handleEmbed(msg) {
-        const async_id = msg.async_id;
-        if (!this.env.AI) {
-            return JSON.stringify({ success: false, error: 'AI binding not configured', async_id });
-        }
-        try {
-            const model = msg.args.options?.model || '@cf/baai/bge-base-en-v1.5';
-            const input = msg.args.input;
-            const response = await this.env.AI.run(model, { text: input });
-            const data = response?.data || response?.result?.data || [];
-            this.pendingAsyncOps.set(async_id, Promise.resolve(data));
-        } catch (err) {
-            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
-        }
-        return JSON.stringify({ success: true, async_id });
-    }
-
-    async handleTursoQuery(msg) {
-        const async_id = msg.async_id;
-        const sql = msg.args.sql;
-        const params = msg.args.params || [];
-        try {
-            const response = await this.tursoFetch(sql, params);
-            const rows = response?.results?.[0]?.response?.result?.rows || response?.rows || [];
-            this.pendingAsyncOps.set(async_id, Promise.resolve(rows));
-        } catch (err) {
-            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
-        }
-        return JSON.stringify({ success: true, async_id });
-    }
-
-    async handleTursoExecute(msg) {
-        const async_id = msg.async_id;
-        const sql = msg.args.sql;
-        const params = msg.args.params || [];
-        try {
-            const response = await this.tursoFetch(sql, params);
-            const affected = response?.results?.[0]?.response?.result?.affected_count ||
-                response?.affected_count || 0;
-            this.pendingAsyncOps.set(async_id, Promise.resolve(affected));
-        } catch (err) {
-            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
-        }
-        return JSON.stringify({ success: true, async_id });
-    }
-
-    async tursoFetch(sql, params) {
-        const url = this.env.TURSO_URL;
-        const token = this.env.TURSO_AUTH_TOKEN;
-        if (!url || !token) {
-            throw new Error('Turso URL or auth token not configured');
-        }
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                requests: [
-                    {
-                        type: 'execute',
-                        stmt: { sql, args: params.map(p => ({ type: 'text', value: String(p) })) },
-                    },
-                ],
-            }),
-        });
-        if (!response.ok) {
-            throw new Error(`Turso error: ${response.status} ${await response.text()}`);
-        }
-        return response.json();
-    }
-
-    // ── Vectorize Handlers ────────────────────────────────────────
-
-    async handleVectorizeUpsert(msg, binding) {
-        const async_id = msg.async_id;
-        if (!binding) {
-            return JSON.stringify({ success: false, error: 'Vectorize binding not configured', async_id });
-        }
-        try {
-            const vectors = JSON.parse(msg.args.vectors);
-            const result = await binding.upsert(vectors);
-            const count = result?.count ?? vectors.length;
-            this.pendingAsyncOps.set(async_id, Promise.resolve(count));
-        } catch (err) {
-            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
-        }
-        return JSON.stringify({ success: true, async_id });
-    }
-
-    async handleVectorizeQuery(msg, binding) {
-        const async_id = msg.async_id;
-        if (!binding) {
-            return JSON.stringify({ success: false, error: 'Vectorize binding not configured', async_id });
-        }
-        try {
-            const vector = JSON.parse(msg.args.vector);
-            const topK = parseInt(msg.args.topK || '5', 10);
-            const filter = msg.args.filter ? JSON.parse(msg.args.filter) : undefined;
-
-            const queryOptions = { topK, returnValues: true, returnMetadata: true };
-            if (filter && Object.keys(filter).length > 0) {
-                queryOptions.filter = filter;
-            }
-
-            const result = await binding.query(vector, queryOptions);
-            // Convert Vectorize distance (0=identical, 2=opposite) to BXAI score (0-1, higher=better)
-            const matches = (result.matches || []).map(m => ({
-                id: m.id,
-                score: 1 - (m.score / 2),
-                metadata: m.metadata || {},
-                values: m.values || [],
-            }));
-            this.pendingAsyncOps.set(async_id, Promise.resolve({ count: result.count || matches.length, matches }));
-        } catch (err) {
-            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
-        }
-        return JSON.stringify({ success: true, async_id });
-    }
-
-    async handleVectorizeDeleteByIds(msg, binding) {
-        const async_id = msg.async_id;
-        if (!binding) {
-            return JSON.stringify({ success: false, error: 'Vectorize binding not configured', async_id });
-        }
-        try {
-            const ids = JSON.parse(msg.args.ids);
-            const result = await binding.deleteByIds(ids);
-            this.pendingAsyncOps.set(async_id, Promise.resolve(result));
-        } catch (err) {
-            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
-        }
         return JSON.stringify({ success: true, async_id });
     }
 

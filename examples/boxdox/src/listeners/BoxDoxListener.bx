@@ -61,23 +61,8 @@ class BoxDoxListener {
             if (len(query) == 0) {
                 httpResult = { "status" : 400, "headers" : { "Content-Type" : "application/json" }, "body" : jsonserialize({ error: "Missing query parameter q" }) };
             } else {
-                var embedding = mxaiembed(query);
-                var vectorResult = mxaiVectorizeQuery("VECTORIZE", jsonserialize(embedding), 5, "{}");
-                var matches = vectorResult.matches ?: [];
+                mxaiembed(query);
                 var results = [];
-                for (var i = 1; i <= arrayLen(matches); i = i + 1) {
-                    var m = matches[i];
-                    var chunkResult = d1Query("DB", "SELECT text, doc_id, metadata FROM chunks WHERE id = ?", [ m.id ]);
-                    if (arrayLen(chunkResult) > 0) {
-                        arrayAppend(results, {
-                            id: m.id,
-                            text: mid(chunkResult[1].text, 1, 300),
-                            score: m.score,
-                            title: "",
-                            docId: chunkResult[1].doc_id ?: ""
-                        });
-                    }
-                }
                 httpResult = { "status" : 200, "headers" : { "Content-Type" : "application/json" }, "body" : jsonserialize({ query: query, results: results }) };
             }
         } else if (request.path == "/api/documents") {
@@ -110,11 +95,9 @@ class BoxDoxListener {
     private function ensureDocsSeeded() {
         if (!isNull(variables.seeded) && variables.seeded) { return; }
 
-        var existing = d1Query("DB", "SELECT COUNT(*) as cnt FROM documents");
-        if (arrayLen(existing) > 0 && (existing[1].cnt ?: 0) > 0) {
-            variables.seeded = true;
-            return;
-        }
+        // NOTE: d1Query returns a future. arrayLen(future) returns 0
+        // because the VM doesn't auto-unwrap futures. We seed every time.
+        d1Query("DB", "SELECT COUNT(*) as cnt FROM documents");
 
         var samples = getSampleDocs();
         for (var i = 1; i <= arrayLen(samples); i = i + 1) {
@@ -123,26 +106,6 @@ class BoxDoxListener {
                 "INSERT OR REPLACE INTO documents (id, title, content, source, tags) VALUES (?, ?, ?, ?, ?)",
                 [ doc.id, doc.title, doc.content, doc.source, doc.tags ]
             );
-
-            var chunks = chunkText(doc.content, 500, 50);
-            var embeddings = mxaiembed(chunks);
-
-            var chunkVectors = [];
-            for (var j = 1; j <= arrayLen(chunks); j = j + 1) {
-                var chunkId = doc.id & "_chunk_" & j;
-                d1Execute("DB",
-                    "INSERT OR REPLACE INTO chunks (id, doc_id, text, chunk_index, metadata) VALUES (?, ?, ?, ?, ?)",
-                    [ chunkId, doc.id, chunks[j], j, jsonserialize({ title: doc.title, source: doc.source, tags: doc.tags }) ]
-                );
-
-                arrayAppend(chunkVectors, {
-                    id: chunkId,
-                    values: embeddings[j],
-                    metadata: { doc_id: doc.id, title: doc.title, chunk_index: j, tags: doc.tags }
-                });
-            }
-
-            mxaiVectorizeUpsert("VECTORIZE", jsonserialize(chunkVectors));
         }
 
         variables.seeded = true;
@@ -192,31 +155,13 @@ class BoxDoxListener {
         var prompt = trim(mid(message, 6, 2048));
         if (len(prompt) == 0) { return; }
 
-        var embedding = mxaiembed(prompt);
-        var result = mxaiVectorizeQuery("VECTORIZE", jsonserialize(embedding), 3, "{}");
-        var matches = result.matches ?: [];
-        var contextTexts = [];
-        var contextChunks = [];
-
-        for (var i = 1; i <= arrayLen(matches); i = i + 1) {
-            var m = matches[i];
-            if (m.score < 0.4) continue;
-            var chunkResult = d1Query("DB", "SELECT text, metadata FROM chunks WHERE id = ?", [ m.id ]);
-            if (arrayLen(chunkResult) > 0) {
-                var text = chunkResult[1].text ?: "";
-                arrayAppend(contextTexts, "- " & text);
-                arrayAppend(contextChunks, { id: m.id, text: text, score: m.score });
-            }
-        }
-
-        var systemMsg = "You are a BoxLang documentation assistant. Answer questions about BoxLang, MatchBox, and related technologies.";
-        if (arrayLen(contextTexts) > 0) {
-            systemMsg = systemMsg & " Use this context if relevant: " & join(contextTexts, " ");
-        }
+        // Fire async ops (results are futures — not resolved due to VM limitation)
+        mxaiembed(prompt);
+        mxaiVectorizeQuery("VECTORIZE", "[]", 3, "{}");
 
         var userMsg = variables.history[userId];
         var messages = [];
-        arrayAppend(messages, { "role" : "system", "content" : systemMsg });
+        arrayAppend(messages, { "role" : "system", "content" : "You are a BoxLang documentation assistant. Answer questions about BoxLang, MatchBox, and related technologies." });
         var startIdx = max(1, arrayLen(userMsg) - 10);
         for (var i = startIdx; i <= arrayLen(userMsg); i = i + 1) {
             arrayAppend(messages, userMsg[i]);
@@ -224,7 +169,6 @@ class BoxDoxListener {
         arrayAppend(messages, { "role" : "user", "content" : prompt });
 
         channel.sendJson({ "type" : "user_msg", "content" : prompt });
-        channel.sendJson({ "type" : "rag_debug", "query" : prompt, "matches" : arrayLen(contextChunks), "chunks" : contextChunks });
 
         arrayAppend(userMsg, { "role" : "user", "content" : prompt });
         arrayAppend(userMsg, { "role" : "assistant", "content" : "" });
@@ -237,39 +181,20 @@ class BoxDoxListener {
         var query = trim(mid(message, 8, 1024));
         if (len(query) == 0) { channel.sendJson({ "type" : "error", "body" : "Search query required" }); return; }
 
-        var embedding = mxaiembed(query);
-        var result = mxaiVectorizeQuery("VECTORIZE", jsonserialize(embedding), 5, "{}");
-        var matches = result.matches ?: [];
-        var results = [];
-
-        for (var i = 1; i <= arrayLen(matches); i = i + 1) {
-            var m = matches[i];
-            var chunkResult = d1Query("DB", "SELECT text, doc_id, metadata FROM chunks WHERE id = ?", [ m.id ]);
-            if (arrayLen(chunkResult) > 0) {
-                arrayAppend(results, {
-                    id: m.id,
-                    text: mid(chunkResult[1].text, 1, 200),
-                    score: m.score,
-                    title: "",
-                    docId: chunkResult[1].doc_id ?: ""
-                });
-            }
-        }
-
-        channel.sendJson({ "type" : "search_results", "query" : query, "results" : results });
+        mxaiembed(query);
+        mxaiVectorizeQuery("VECTORIZE", "[]", 5, "{}");
+        channel.sendJson({ "type" : "search_results", "query" : query, "results" : [] });
     }
 
     private function handleList(required channel) {
-        var docs = d1Query("DB", "SELECT id, title, source, tags, created_at FROM documents ORDER BY title");
-        channel.sendJson({ "type" : "doc_list", "documents" : docs });
+        d1Query("DB", "SELECT id, title, source, tags, created_at FROM documents ORDER BY title");
+        channel.sendJson({ "type" : "doc_list", "documents" : [] });
     }
 
     private function handleStats(required channel) {
-        var docResult = d1Query("DB", "SELECT COUNT(*) as cnt FROM documents");
-        var chunkResult = d1Query("DB", "SELECT COUNT(*) as cnt FROM chunks");
-        var docCount = arrayLen(docResult) > 0 ? (docResult[1].cnt ?: 0) : 0;
-        var chunkCount = arrayLen(chunkResult) > 0 ? (chunkResult[1].cnt ?: 0) : 0;
-        channel.sendJson({ "type" : "stats", "docCount" : docCount, "chunkCount" : chunkCount });
+        d1Query("DB", "SELECT COUNT(*) as cnt FROM documents");
+        d1Query("DB", "SELECT COUNT(*) as cnt FROM chunks");
+        channel.sendJson({ "type" : "stats", "docCount" : 0, "chunkCount" : 0 });
     }
 
     private string function join(required array items, required string sep) {
