@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BoxDox - BoxLang Documentation Browser</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+:root {
+    --bg: #0f1117;
+    --bg-2: #161822;
+    --bg-3: #1e2030;
+    --border: #2a2d3e;
+    --text: #c0caf5;
+    --text-2: #a9b1d6;
+    --text-3: #565f89;
+    --accent: #7aa2f7;
+    --accent-2: #2ac3de;
+    --green: #9ece6a;
+    --orange: #ff9e64;
+    --red: #f7768e;
+    --purple: #bb9af7;
+    --sidebar-w: 280px;
+    --toc-w: 240px;
+    --top-h: 52px;
+    --font: -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    --mono: "JetBrains Mono","Fira Code",monospace;
+    --radius: 8px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { height:100%; background:var(--bg); color:var(--text); font-family:var(--font); font-size:15px; line-height:1.6; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+#app { display:flex; flex-direction:column; height:100%; }
+.topbar { height:var(--top-h); display:flex; align-items:center; gap:12px; padding:0 16px; background:var(--bg-2); border-bottom:1px solid var(--border); flex-shrink:0; z-index:10; }
+.topbar .logo { font-weight:700; font-size:16px; color:var(--accent); display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.topbar .logo svg { width:22px; height:22px; }
+.topbar .search-wrap { flex:1; max-width:480px; position:relative; }
+.topbar .search-wrap input { width:100%; padding:6px 12px 6px 32px; border-radius:var(--radius); border:1px solid var(--border); background:var(--bg-3); color:var(--text); font-size:13px; outline:none; }
+.topbar .search-wrap input:focus { border-color:var(--accent); }
+.topbar .search-wrap .icon { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-3); font-size:13px; }
+.topbar .badge { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--bg-3); color:var(--text-3); border:1px solid var(--border); white-space:nowrap; }
+.topbar .badge.online { background:#1a3a2a; color:var(--green); border-color:var(--green); }
+.topbar .actions { display:flex; gap:6px; margin-left:auto; }
+.topbar .actions button { padding:5px 12px; border-radius:var(--radius); border:1px solid var(--border); background:var(--bg-3); color:var(--text-2); font-size:12px; cursor:pointer; white-space:nowrap; }
+.topbar .actions button:hover { border-color:var(--accent); color:var(--accent); }
+.topbar .actions button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+.body { display:flex; flex:1; overflow:hidden; }
+.sidebar { width:var(--sidebar-w); background:var(--bg-2); border-right:1px solid var(--border); overflow-y:auto; flex-shrink:0; padding:8px 0; }
+.sidebar::-webkit-scrollbar { width:4px; }
+.nav-item { display:flex; align-items:center; gap:6px; padding:4px 16px; font-size:13px; cursor:pointer; color:var(--text-2); transition:background 0.15s; }
+.nav-item:hover { background:var(--bg-3); color:var(--text); }
+.nav-item.active { background:rgba(122,162,247,0.12); color:var(--accent); }
+.nav-item .icon { flex-shrink:0; width:16px; text-align:center; font-size:11px; color:var(--text-3); }
+.nav-item .label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nav-dir > .nav-item { font-weight:600; color:var(--text); }
+.nav-file { padding-left:38px; }
+.nav-indent { padding-left:32px; }
+.content { flex:1; overflow-y:auto; padding:32px 48px; max-width:860px; }
+.content h1 { font-size:28px; font-weight:700; margin-bottom:16px; color:#e0e5f5; }
+.content h2 { font-size:20px; font-weight:600; margin-top:32px; margin-bottom:12px; color:#d0d5e8; padding-bottom:6px; border-bottom:1px solid var(--border); }
+.content h3 { font-size:16px; font-weight:600; margin-top:24px; margin-bottom:8px; color:var(--text); }
+.content p { margin-bottom:12px; }
+.content ul, .content ol { margin-bottom:12px; padding-left:24px; }
+.content li { margin-bottom:4px; }
+.content code { font-family:var(--mono); font-size:13px; background:var(--bg-3); padding:2px 6px; border-radius:4px; }
+.content pre { background:var(--bg-3); border:1px solid var(--border); border-radius:var(--radius); padding:16px; overflow-x:auto; margin-bottom:16px; }
+.content pre code { background:none; padding:0; }
+.content blockquote { border-left:3px solid var(--accent); padding:8px 16px; margin:12px 0; background:var(--bg-3); border-radius:0 var(--radius) var(--radius) 0; color:var(--text-2); }
+.content table { width:100%; border-collapse:collapse; margin:12px 0; }
+.content th, .content td { padding:8px 12px; border:1px solid var(--border); text-align:left; }
+.content th { background:var(--bg-3); font-weight:600; }
+.content img { max-width:100%; border-radius:var(--radius); margin:12px 0; }
+.content hr { border:none; border-top:1px solid var(--border); margin:24px 0; }
+.content .alert { padding:12px 16px; border-radius:var(--radius); margin:12px 0; font-size:13px; }
+.content .alert.info { background:rgba(122,162,247,0.1); border-left:3px solid var(--accent); }
+.content .alert.warn { background:rgba(255,158,100,0.1); border-left:3px solid var(--orange); }
+.toc { width:var(--toc-w); padding:24px 16px; overflow-y:auto; flex-shrink:0; border-left:1px solid var(--border); }
+.toc h3 { font-size:11px; text-transform:uppercase; letter-spacing:0.8px; color:var(--text-3); margin-bottom:12px; }
+.toc a { display:block; padding:3px 8px; font-size:12px; color:var(--text-3); border-radius:4px; transition:all 0.15s; }
+.toc a:hover { color:var(--text); background:var(--bg-3); text-decoration:none; }
+.toc a.toc-h3 { padding-left:20px; }
+.toc a.active { color:var(--accent); background:rgba(122,162,247,0.1); }
+.chat-panel { display:none; flex-direction:column; width:380px; background:var(--bg-2); border-left:1px solid var(--border); flex-shrink:0; }
+.chat-panel.open { display:flex; }
+.chat-panel .chat-header { padding:12px 16px; border-bottom:1px solid var(--border); font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px; }
+.chat-panel .chat-header .close { margin-left:auto; cursor:pointer; color:var(--text-3); font-size:16px; }
+.chat-panel .chat-msgs { flex:1; overflow-y:auto; padding:12px 16px; }
+.chat-panel .chat-msgs .msg { margin-bottom:12px; font-size:13px; line-height:1.5; }
+.chat-panel .chat-msgs .msg.user { color:var(--accent); }
+.chat-panel .chat-msgs .msg.ai { color:var(--text); }
+.chat-panel .chat-msgs .msg.system { color:var(--text-3); font-style:italic; font-size:12px; }
+.chat-panel .chat-input { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--border); }
+.chat-panel .chat-input input { flex:1; padding:8px 12px; border-radius:var(--radius); border:1px solid var(--border); background:var(--bg-3); color:var(--text); font-size:13px; outline:none; }
+.chat-panel .chat-input input:focus { border-color:var(--accent); }
+.chat-panel .chat-input button { padding:8px 16px; border-radius:var(--radius); border:none; background:var(--accent); color:#fff; font-size:13px; cursor:pointer; }
+.chat-panel .chat-input button:disabled { opacity:0.5; cursor:default; }
+.chat-panel .rag-source { font-size:11px; color:var(--text-3); padding:4px 0; cursor:pointer; }
+.chat-panel .rag-source:hover { color:var(--accent); }
+.search-overlay { display:none; position:fixed; top:var(--top-h); left:0; right:0; bottom:0; background:var(--bg); z-index:20; overflow-y:auto; padding:24px; }
+.search-overlay.open { display:block; }
+.search-overlay h2 { font-size:16px; color:var(--text-2); margin-bottom:16px; }
+.search-result { padding:12px 16px; border:1px solid var(--border); border-radius:var(--radius); margin-bottom:8px; cursor:pointer; transition:background 0.15s; }
+.search-result:hover { background:var(--bg-3); }
+.search-result .title { font-weight:600; font-size:14px; color:var(--accent); }
+.search-result .score { font-size:11px; color:var(--green); }
+.search-result .snippet { font-size:12px; color:var(--text-2); margin-top:4px; }
+.loading { display:flex; align-items:center; justify-content:center; padding:60px; color:var(--text-3); font-size:14px; gap:8px; }
+.spinner { width:18px; height:18px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.empty-state { text-align:center; padding:80px 20px; color:var(--text-3); }
+.empty-state h2 { font-size:20px; margin-bottom:8px; color:var(--text-2); }
+.empty-state p { font-size:14px; }
+@media (max-width:1024px) { .toc { display:none; } .content { padding:24px; } }
+@media (max-width:768px) {
+    .sidebar { display:none; }
+    .sidebar.mobile-open { display:block; position:fixed; top:var(--top-h); left:0; bottom:0; width:280px; z-index:30; }
+    .content { padding:16px; }
+    .chat-panel { width:100%; position:fixed; top:var(--top-h); left:0; bottom:0; z-index:30; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      BoxDox
+    </div>
+    <div class="search-wrap">
+      <span class="icon">&#128269;</span>
+      <input id="searchInput" type="text" placeholder="Search BoxLang docs..." onkeydown="if(event.key==='Enter')doSearch(this.value)">
+    </div>
+    <span id="statusBadge" class="badge">Disconnected</span>
+    <div class="actions">
+      <button id="chatToggle" onclick="toggleChat()">AI Chat</button>
+      <button onclick="window.open(location.origin+'/api/documents','_blank')">Docs API</button>
+    </div>
+  </div>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="content" id="content">
+      <div class="empty-state">
+        <h2>Welcome to BoxLang Docs</h2>
+        <p>Browse the documentation using the sidebar, or ask AI a question.</p>
+      </div>
+    </main>
+    <aside class="toc" id="toc">
+      <h3>On this page</h3>
+      <div id="tocLinks"></div>
+    </aside>
+    <div class="chat-panel" id="chatPanel">
+      <div class="chat-header">
+        <span>AI Chat</span>
+        <span class="rag-source" id="ragInfo" title="RAG context sources"></span>
+        <span class="close" onclick="toggleChat()">&times;</span>
+      </div>
+      <div class="chat-msgs" id="chatMsgs"></div>
+      <div class="chat-input">
+        <input id="chatInput" type="text" placeholder="Ask about BoxLang..." onkeydown="if(event.key==='Enter')sendChat()">
+        <button id="chatSend" onclick="sendChat()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="search-overlay" id="searchOverlay">
+  <h2 id="searchTitle">Search Results</h2>
+  <div id="searchResults"></div>
+</div>
+<script>
+(function() {
+  const cid = crypto.randomUUID();
+  const wsUrl = (location.protocol==="https:"?"wss:":"ws:")+"//"+location.host+"?cid="+cid;
+  const sseUrl = (location.protocol==="https:"?"https:":"http:")+"//"+location.host+"/?cid="+cid;
+  let ws = null, es = null, aiBubble = null, pingTimer = null;
+  let chatHistory = [];
+
+  function $(id) { return document.getElementById(id); }
+
+  function setStatus(online) {
+    const b = $("statusBadge");
+    b.textContent = online ? "Connected" : "Disconnected";
+    b.className = "badge" + (online ? " online" : "");
+  }
+
+  function log(msg, cls) {
+    const d = document.createElement("div");
+    d.className = "msg " + (cls||"system");
+    d.textContent = msg;
+    $("chatMsgs").appendChild(d);
+    $("chatMsgs").scrollTop = $("chatMsgs").scrollHeight;
+  }
+
+  function startAiBubble() {
+    const d = document.createElement("div"); d.className = "msg ai";
+    const s = document.createElement("span"); s.textContent = "Thinking..."; s.style.color="var(--text-3)";
+    d.appendChild(s);
+    const c = document.createElement("span"); c.style.display="none";
+    d.appendChild(c);
+    $("chatMsgs").appendChild(d);
+    $("chatMsgs").scrollTop = $("chatMsgs").scrollHeight;
+    aiBubble = { container:d, thinking:s, content:c };
+    $("chatSend").disabled = true;
+    $("chatInput").disabled = true;
+  }
+
+  function addAiChunk(text) {
+    if (!aiBubble) return;
+    aiBubble.thinking.style.display = "none";
+    aiBubble.content.style.display = "";
+    aiBubble.content.textContent += text;
+    $("chatMsgs").scrollTop = $("chatMsgs").scrollHeight;
+  }
+
+  function finishAiBubble() {
+    aiBubble = null;
+    $("chatSend").disabled = false;
+    $("chatInput").disabled = false;
+    $("chatInput").focus();
+  }
+
+  function showRagInfo(chunks) {
+    const el = $("ragInfo");
+    if (chunks && chunks.length > 0) {
+      el.textContent = "Sources: " + chunks.length + " docs";
+      el.title = chunks.map(function(c){return c.text.slice(0,100)}).join("\n---\n");
+    } else {
+      el.textContent = "No RAG context";
+    }
+  }
+
+  window.toggleChat = function() {
+    const p = $("chatPanel");
+    p.classList.toggle("open");
+    if (p.classList.contains("open")) $("chatInput").focus();
+  };
+
+  window.sendChat = function() {
+    const input = $("chatInput");
+    const text = input.value.trim();
+    if (!text || $("chatSend").disabled) return;
+    input.value = "";
+    log(text, "user");
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send("chat " + text);
+  };
+
+  window.doSearch = function(query) {
+    if (!query.trim()) return;
+    const overlay = $("searchOverlay");
+    $("searchTitle").textContent = "Searching: " + query;
+    $("searchResults").innerHTML = "<div class=loading><div class=spinner></div><span>Searching...</span></div>";
+    overlay.classList.add("open");
+    fetch("/api/search?q=" + encodeURIComponent(query))
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        const results = data.results || [];
+        if (results.length === 0) {
+          $("searchResults").innerHTML = "<p style='color:var(--text-3);padding:20px;'>No results found.</p>";
+          return;
+        }
+        var html = "";
+        results.forEach(function(r) {
+          html += "<div class=search-result onclick='navigateToDoc(\"" + r.docId + "\")'>" +
+            "<div><span class=title>" + esc(r.title) + "</span> <span class=score>[" + r.score.toFixed(3) + "]</span></div>" +
+            "<div class=snippet>" + esc(r.text) + "</div></div>";
+        });
+        $("searchResults").innerHTML = html;
+      })
+      .catch(function(err) {
+        $("searchResults").innerHTML = "<p style='color:var(--red)'>Error: " + err.message + "</p>";
+      });
+  };
+
+  window.navigateToDoc = function(id) {
+    $("searchOverlay").classList.remove("open");
+    loadDocById(id);
+  };
+
+  function loadDocById(id) {
+    $("content").innerHTML = "<div class=loading><div class=spinner></div><span>Loading...</span></div>";
+    fetch("/api/page?path=" + encodeURIComponent(id))
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        if (data.error) { $("content").innerHTML = "<p style='padding:40px;color:var(--text-3);'>" + data.error + "</p>"; return; }
+        renderDoc(data);
+      })
+      .catch(function(err) {
+        $("content").innerHTML = "<p style='padding:40px;color:var(--red);'>Error: " + err.message + "</p>";
+      });
+  }
+
+  window.loadDoc = function(path) {
+    $("content").innerHTML = "<div class=loading><div class=spinner></div><span>Loading...</span></div>";
+    fetch("/api/page?path=" + encodeURIComponent(path))
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        if (data.error) { $("content").innerHTML = "<p style='padding:40px;color:var(--text-3);'>" + data.error + "</p>"; return; }
+        renderDoc(data);
+        setActiveNav(path);
+      })
+      .catch(function(err) {
+        $("content").innerHTML = "<p style='padding:40px;color:var(--red);'>Error: " + err.message + "</p>";
+      });
+  };
+
+  function renderDoc(data) {
+    var html = "";
+    if (data.frontmatter && data.frontmatter.description) {
+      html += "<p style='color:var(--text-2);margin-bottom:24px;font-size:14px;'>" + esc(data.frontmatter.description) + "</p>";
+    }
+    html += marked.parse(data.content);
+    $("content").innerHTML = html;
+    document.title = data.title ? (data.title + " - BoxDox") : "BoxDox - BoxLang Docs";
+    var tocHtml = "";
+    if (data.sections) {
+      data.sections.forEach(function(s) {
+        tocHtml += "<a href='#" + s.anchor + "' class='toc-h" + s.level + "'>" + esc(s.text) + "</a>";
+      });
+    }
+    $("tocLinks").innerHTML = tocHtml;
+    if (location.hash) {
+      setTimeout(function() {
+        var el = document.getElementById(location.hash.slice(1));
+        if (el) el.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    }
+  }
+
+  function setActiveNav(path) {
+    document.querySelectorAll(".nav-item").forEach(function(el) {
+      el.classList.toggle("active", el.dataset.path === path);
+    });
+  }
+
+  function esc(s) {
+    if (typeof s !== "string") return String(s);
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  function buildNav(tree, depth) {
+    if (!tree || !tree.children) return "";
+    var html = "";
+    var sorted = tree.children.slice().sort(function(a,b) {
+      if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+      return a.name < b.name ? -1 : 1;
+    });
+    sorted.forEach(function(item) {
+      if (item.type === "directory") {
+        html += "<div class=nav-dir>";
+        html += "<div class='nav-item nav-indent' onclick='this.parentElement.classList.toggle(\"collapsed\")' style='cursor:pointer'>" +
+          "<span class=icon>" + (item.children && item.children.length ? "&#9660;" : "&#9654;") + "</span>" +
+          "<span class=label>" + esc(item.name) + "</span></div>";
+        html += "<div class=dir-children>" + buildNav(item, depth+1) + "</div>";
+        html += "</div>";
+      } else if (item.is_markdown) {
+        var title = item.name.replace(/\.mdx?$/,"").replace(/-/g," ").replace(/\b\w/g,function(c){return c.toUpperCase()});
+        var path = item.path.replace(/\.mdx?$/,"");
+        html += "<div class='nav-item nav-file' data-path='" + esc(path) + "' onclick='loadDoc(\"" + esc(path) + "\")'>" +
+          "<span class=icon>#</span><span class=label>" + esc(title) + "</span></div>";
+      }
+    });
+    return html;
+  }
+
+  fetch("/api/nav-tree").then(function(r){ return r.json(); }).then(function(tree) {
+    $("sidebar").innerHTML = buildNav(tree, 0);
+  }).catch(function(err) {
+    $("sidebar").innerHTML = "<div style='padding:16px;color:var(--text-3);font-size:13px;'>Failed to load navigation: " + err.message + "</div>";
+  });
+
+  function connectSSE() {
+    if (es) es.close();
+    es = new EventSource(sseUrl);
+    es.addEventListener("user_msg", function(e){ var m=JSON.parse(e.data); log(m.content,"user"); });
+    es.addEventListener("ai_start", function(e){ startAiBubble(); });
+    es.addEventListener("ai_chunk", function(e){ var m=JSON.parse(e.data); addAiChunk(m.content); });
+    es.addEventListener("ai_done", function(){ finishAiBubble(); });
+    es.addEventListener("error", function(e) {
+      if (e.data) { try { var m=JSON.parse(e.data); log(m.body,"system"); } catch(_){} }
+      finishAiBubble();
+    });
+    es.addEventListener("rag_debug", function(e){ var m=JSON.parse(e.data); showRagInfo(m.chunks); });
+    es.addEventListener("open", function(){ connectWS(); });
+  }
+
+  function connectWS() {
+    if (ws) { try{ws.close()}catch(e){} ws=null; }
+    ws = new WebSocket(wsUrl);
+    ws.onopen = function(){ setStatus(true); startPing(); };
+    ws.onclose = function(){ setStatus(false); clearInterval(pingTimer); setTimeout(connectSSE, 2000); };
+    ws.onmessage = function(e) {
+      if (e.data === "__pong__") return;
+    };
+  }
+
+  function startPing() {
+    clearInterval(pingTimer);
+    pingTimer = setInterval(function() {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send("__ping__");
+    }, 25000);
+  }
+
+  connectSSE();
+
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+      $("searchOverlay").classList.remove("open");
+    }
+  });
+})();
+</script>
+</body>
+</html>

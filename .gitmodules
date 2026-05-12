@@ -4,3 +4,6 @@
 [submodule "refs/bx-demos"]
 	path = refs/bx-demos
 	url = https://github.com/ortus-boxlang/bx-demos.git
+[submodule "refs/bx-ai"]
+	path = refs/bx-ai
+	url = https://github.com/ortus-boxlang/bx-ai.git

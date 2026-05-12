@@ -1,0 +1,28 @@
+name = "skybox-boxdox"
+main = "mcf-worker.js"
+compatibility_date = "2025-01-01"
+account_id = "84882f590c2154079d59fbaef6fb382b"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skybox-boxdox-db"
+database_id = "d45e5090-48b3-457f-b5a3-14ce24669b9e"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "skybox-boxdox-vectors"
+
+[[r2_buckets]]
+binding = "DOCS_BUCKET"
+bucket_name = "skybox-boxdox-content"
+
+[[durable_objects.bindings]]
+name = "WEBSOCKET_DO"
+class_name = "MatchBoxWebSocketDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MatchBoxWebSocketDO"]
+
+[assets]
+directory = "dist/assets"
