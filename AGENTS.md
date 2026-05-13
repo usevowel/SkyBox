@@ -127,6 +127,24 @@ These project-specific skills could accelerate development:
 
 **Rule of thumb**: If a crate solves the problem in 1-2 function calls and is WASM-compatible, use it. If you'd only use 5% of the crate, it's probably lighter to write the code yourself.
 
+## Research Before Planning
+
+**Always research before writing any plan, design doc, or code.** Use web search tools (Exa, Context7, deepwiki) to discover:
+
+- **Best practices & patterns** — Before deciding on an approach, search for current best practices, community conventions, and idiomatic patterns for the language/framework/domain. Don't assume you know the standard approach.
+- **Existing libraries & tools** — Search crates.io, npm, PyPI, Maven, etc. for libraries that solve the problem. Evaluate at least 2-3 alternatives before deciding.
+- **Reference implementations** — Look for examples in the SkyBox repo (`refs/`), open-source projects, or official docs. Reuse proven patterns rather than inventing from scratch.
+- **Avoided-cost analysis** — For each approach, weigh pros and cons: maintenance burden, WASM compatibility, bundle size, API surface, community health, and how much of the library you'd actually use.
+
+**Process:**
+1. Search the web / docs for best practices related to the task
+2. Search for existing libraries (crates, packages, modules) that could help
+3. Compare 2-3 options with explicit pros/cons
+4. Only then write a plan or start implementation
+5. Store research findings with `bd remember` for future reference
+
+**Don't skip this.** The cost of a wrong architectural decision or a hand-rolled solution where a library exists far exceeds the time to do research upfront.
+
 ## BXAI → MXAI Conversion Workflow
 
 This project ports BoxLang AI (`refs/bx-ai/`) BIFs to the MatchBox/WASM runtime
@@ -181,6 +199,168 @@ To port `aiTool.bx` from BXAI to MXAI:
 4. Implement the `aiTool.bx` BoxLang BIF that creates a tool struct and registers it via callout
 5. Add `sendMessage()` fallback for tool results (since tools return to the AI, not the user)
 6. Update `streamOpenRouter()` to include tool definitions in the OpenRouter API call
+
+## BXAI API Mirroring Mandate
+
+**MXAI must be a close drop-in for BXAI.** All RAG-related MXAI code must mirror the BXAI API surface at `refs/bx-ai/` (added as a git submodule). Do NOT invent new API shapes — map to existing BXAI interfaces.
+
+### RAG API Surface (from refs/bx-ai/)
+
+#### Key BIFs
+
+| BXAI BIF | MXAI Status | Notes |
+|----------|-------------|-------|
+| `aiMemory(type, key, userId, conversationId, config)` | TODO — `VectorizeMemory.bx` wrapping `mxaiVectorizeUpsert/Query` | Must return object matching `IVectorMemory` interface |
+| `aiEmbed(input, params, options)` | ✅ `aiEmbed.bx` → `mxaiEmbed()` | Already matches BXAI signature |
+| `aiDocuments(source, config)` | TODO — port from refs/bx-ai/ | Pure BoxLang, passthrough port |
+| `aiChunk(text, options)` | TODO — port from refs/bx-ai/ | Pure BoxLang, passthrough port |
+
+#### IVectorMemory Interface (what `aiMemory("boxvector")` returns)
+
+```boxlang
+interface IVectorMemory {
+    // Semantic search — THE critical RAG method
+    array function getRelevant(
+        required string query,
+        numeric limit = 5,
+        struct filter = {},
+        numeric minScore = 0.0,
+        string userId = "",
+        string conversationId = ""
+    );
+    // Returns EXACTLY: [{ id, text, score, metadata, embedding }, ...]
+
+    // Raw vector search
+    array function findSimilar(
+        required array embedding,
+        numeric limit = 5,
+        struct filter = {},
+        string userId = "",
+        string conversationId = ""
+    );
+    // Returns: same format as getRelevant
+
+    // Upsert
+    IVectorMemory function addWithId(
+        required string id,
+        required string text,
+        struct metadata = {},
+        string userId = "",
+        string conversationId = ""
+    );
+
+    // Message add (extracts text from struct/string)
+    IAiMemory function add(required any message, ...);
+
+    // Batch add
+    struct function seed(required array documents, ...);
+    // Returns: { added, failed, errors }
+
+    // Lifecycle
+    struct function getConfig();
+    IAiMemory function configure(required struct config);
+    struct function getSummary();
+    array function getAll(...);
+    IAiMemory function clear(...);
+    numeric function count(...);
+    struct function getById(required string id);
+    boolean function remove(required string id);
+    numeric function removeWhere(required struct filter);
+    IVectorMemory function createCollection(required string name);
+    boolean function collectionExists(required string name);
+    IVectorMemory function deleteCollection(required string name);
+}
+```
+
+**Search result struct format (CRITICAL — must match exactly):**
+```boxlang
+{
+    id: string,          // Vector/document ID
+    text: string,        // The document/chunk text content
+    score: numeric,      // 0.0 - 1.0 similarity (higher = better)
+    metadata: struct,    // User-defined metadata + { userId, conversationId }
+    embedding: array     // Full embedding vector (array of floats)
+}
+```
+
+**Score conversion from Vectorize:**
+- Vectorize cosine distance: 0 = identical, 1 = orthogonal, 2 = opposite
+- BXAI score: 0.0-1.0 where higher = more similar
+- Formula: `bxaiScore = 1 - (vectorizeDistance / 2)`
+
+#### Document Value Object (from refs/bx-ai/)
+
+```boxlang
+class Document {
+    property id: string;
+    property content: string;
+    property metadata: struct;
+    property embedding: array;
+
+    // Chunking — THE critical method
+    array function chunk(numeric chunkSize=1000, numeric overlap=200, string strategy="recursive");
+    // Returns array of Document objects with chunk metadata:
+    // { chunkIndex, totalChunks, isChunk, parentId, source, loader, loadedAt }
+
+    struct function toStruct();  // { id, content, metadata, embedding, hash, fingerprint }
+    static Document function fromStruct(required struct data);
+    string function getHash(string algorithm="MD5");
+    Document function setContent(required string content);
+    Document function setMeta(required string key, required any value);
+}
+```
+
+#### TextChunker (static utility)
+
+```boxlang
+TextChunker.chunk(text, options={chunkSize:2000, overlap:200, strategy:"recursive"})
+// Returns array of strings
+// Strategies: "recursive" (default), "characters", "words", "sentences", "paragraphs"
+// Recursive strategy: paragraphs → sentences → words → characters
+```
+
+### Conversion Level for Each BIF
+
+| BIF | Level | Why |
+|-----|-------|-----|
+| `mxaiVectorizeUpsert` | **Rust→JS bridge** | Calls `env.VECTORIZE.upsert()` — Cloudflare Workers API only available in JS |
+| `mxaiVectorizeQuery` | **Rust→JS bridge** | Same — `env.VECTORIZE.query()` is Workers-only |
+| `VectorizeMemory.bx` | **Pure-BoxLang port** | Wraps the Rust BIFs in a BXAI-compatible interface class |
+| `aiChunk.bx` | **Pass-through** | Pure BoxLang, no JVM deps — identical to BXAI |
+| `TextChunker.bx` | **Pass-through** | Pure BoxLang, no JVM deps — identical to BXAI |
+| `Document.bx` | **Pass-through** | Pure BoxLang value object — identical to BXAI |
+| `aiDocuments.bx` | **Pass-through (with stubs)** | Factory BIF is pure BoxLang; file-based loaders need stubs (no FS on Workers) |
+
+### RAG Data Flow (Cloudflare-native + BXAI-compatible)
+
+```
+                   ┌──────────────────┐
+                   │   Vectorize       │  Cloudflare's managed
+                   │   (cosine dist)   │  vector database
+                   └───────┬──────────┘
+                           │ env.VECTORIZE.query()
+                           │ env.VECTORIZE.upsert()
+                           │
+              ┌────────────▼────────────┐
+              │  mxaiVectorizeQuery()    │  Rust BIFs
+              │  mxaiVectorizeUpsert()   │  (BindingCall bridge)
+              └────────────┬────────────┘
+                           │
+              ┌────────────▼────────────┐
+              │  VectorizeMemory.bx      │  BoxLang class
+              │  (wraps BIFs to match    │  mirrors IVectorMemory
+              │   IVectorMemory API)     │
+              └────────────┬────────────┘
+                           │
+              ┌────────────▼────────────┐
+              │  D1 (text lookup)        │  Store chunk text here
+              │                          │  Vectorize stores vectors
+              └─────────────────────────┘
+```
+
+Seed flow: `aiDocuments(source) → .chunkSize(512) → .load()` → `Document[]` → `aiEmbed()` per chunk → `mxaiVectorizeUpsert()` + `d1Execute()` for text
+
+Query flow: `aiEmbed(query)` → `mxaiVectorizeQuery(embedding, topK=5)` → resolve text from D1 → return `[{id, text, score, metadata, embedding}]`
 
 ## Web App Testing with agent-browser
 

@@ -1,0 +1,44 @@
+/**
+ * [MatchBox AI]
+ *
+ * Copyright [2025] SkyBox Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ */
+class {
+
+	property name="moduleRecord";
+	property name="boxRuntime";
+	property name="functionService";
+	property name="interceptorService";
+	property name="log";
+
+	this.version = "0.1.0+0"
+	this.mapping = "mxai"
+	this.author = "SkyBox Contributors"
+	this.description = "MatchBox AI — lightweight AI integration for WASM targets"
+	this.webURL = "https://github.com/usevowel/SkyBox"
+	this.enabled = true
+
+	function configure(){
+		settings = {
+			provider : "openrouter",
+			apiKey : "",
+			defaultParams : {},
+			timeout : 45,
+			logRequest : false,
+			logRequestToConsole : false,
+			logResponse : false,
+			logResponseToConsole : false,
+			returnFormat : "single"
+		}
+		interceptors = []
+		customInterceptionPoints = []
+	}
+
+	function onLoad(){}
+
+	function onUnload(){}
+
+}

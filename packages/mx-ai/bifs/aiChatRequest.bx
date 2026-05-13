@@ -1,0 +1,20 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — not implemented on WASM.
+	 */
+	function invoke(
+		any messages,
+		struct params = {},
+		struct options = {},
+		struct headers = {},
+		struct methodDefaults = {}
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiChatRequest() is not available on MatchBox/WASM."
+		);
+	}
+
+}

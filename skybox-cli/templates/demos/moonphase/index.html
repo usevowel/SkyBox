@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moon Phase Calculator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; }
+header { background: linear-gradient(135deg, #1e293b, #334155); padding: 1.5rem; text-align: center; border-bottom: 1px solid #475569; }
+header h1 { font-size: 1.5rem; background: linear-gradient(90deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+header p { color: #94a3b8; font-size: 0.875rem; margin-top: 0.25rem; }
+.status { text-align: center; padding: 0.5rem; font-size: 0.8rem; }
+.status.connected { color: #4ade80; }
+.status.disconnected { color: #f87171; }
+.container { flex: 1; max-width: 800px; margin: 0 auto; padding: 1rem; width: 100%; display: flex; flex-direction: column; }
+.controls { display: flex; gap: 0.5rem; padding: 1rem 0; flex-wrap: wrap; }
+.controls input { flex: 1; padding: 0.75rem; border: 1px solid #475569; border-radius: 0.5rem; background: #1e293b; color: #e2e8f0; font-size: 0.9rem; min-width: 200px; }
+.controls input:focus { outline: none; border-color: #60a5fa; }
+.controls button { padding: 0.75rem 1.25rem; border: none; border-radius: 0.5rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: all 0.15s; }
+.btn-primary { background: #3b82f6; color: white; }
+.btn-primary:hover { background: #2563eb; }
+.btn-secondary { background: #475569; color: #e2e8f0; }
+.btn-secondary:hover { background: #64748b; }
+.btn-success { background: #22c55e; color: white; }
+.btn-success:hover { background: #16a34a; }
+.messages { flex: 1; overflow-y: auto; padding: 0.5rem; border: 1px solid #334155; border-radius: 0.5rem; background: #0f172a; min-height: 300px; }
+.message { padding: 0.75rem; margin: 0.5rem 0; border-radius: 0.5rem; }
+.message.system { background: #1e293b; border-left: 3px solid #60a5fa; }
+.message.result { background: #1e293b; border-left: 3px solid #4ade80; }
+.message.error { background: #1e293b; border-left: 3px solid #f87171; line-height: 1.6; }
+.message pre { background: #0f172a; padding: 0.5rem; border-radius: 0.25rem; overflow-x: auto; font-size: 0.8rem; margin-top: 0.5rem; }
+.phase-indicator { display: flex; align-items: center; gap: 1rem; margin: 1rem 0; }
+.phase-icon { font-size: 3rem; }
+.phase-info { flex: 1; }
+.phase-name { font-size: 1.25rem; font-weight: 600; }
+.phase-detail { color: #94a3b8; font-size: 0.875rem; }
+.progress-bar { width: 100%; height: 8px; background: #334155; border-radius: 4px; overflow: hidden; margin: 0.5rem 0; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, #60a5fa, #a78bfa); border-radius: 4px; transition: width 0.3s; }
+.quick-btns { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.5rem 0; }
+.quick-btns button { padding: 0.4rem 0.8rem; border: 1px solid #475569; border-radius: 0.25rem; background: #1e293b; color: #94a3b8; cursor: pointer; font-size: 0.8rem; }
+.quick-btns button:hover { background: #334155; color: #e2e8f0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌙 Moon Phase Calculator</h1>
+  <p>Calculate moon phases for any date</p>
+</header>
+<div class="status disconnected" id="status">Disconnected</div>
+<div class="container">
+  <div class="quick-btns">
+    <button onclick="sendAction('now')">🌕 Now</button>
+    <button onclick="sendAction('help')">❓ Help</button>
+  </div>
+  <div class="controls">
+    <input type="date" id="dateInput" />
+    <button class="btn-primary" onclick="sendDate()">Get Phase</button>
+  </div>
+  <div class="messages" id="messages"></div>
+</div>
+<script>
+const ws = new WebSocket('ws://' + location.host + '/ws');
+const messages = document.getElementById('messages');
+const status = document.getElementById('status');
+
+ws.onopen = () => {
+  status.textContent = 'Connected';
+  status.className = 'status connected';
+};
+
+ws.onclose = () => {
+  status.textContent = 'Disconnected';
+  status.className = 'status disconnected';
+};
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  handleMessage(data);
+};
+
+function handleMessage(data) {
+  if (data.type === 'welcome') {
+    addMessage('system', '🌙 ' + data.service);
+    addMessage('result', 'Current moon phase: <strong>' + data.phaseName + '</strong> (' + (data.phase * 100).toFixed(1) + '%)');
+    addPhaseBar(data.phase, data.phaseName);
+  } else if (data.type === 'result') {
+    addMessage('result', createPhaseResultHTML(data));
+    if (data.phase !== undefined) addPhaseBar(data.phase, data.phaseName);
+  } else if (data.type === 'error') {
+    addMessage('error', '⚠️ ' + data.message);
+  } else if (data.type === 'help') {
+    let html = '📖 <strong>Commands:</strong><br>';
+    data.commands.forEach(c => {
+      html += '• <code>' + JSON.stringify(c) + '</code><br>';
+    });
+    addMessage('system', html);
+  }
+}
+
+function createPhaseResultHTML(d) {
+  const emoji = getPhaseEmoji(d.phase);
+  return emoji + ' <strong>' + d.phaseName + '</strong><br>' +
+    '<small>📅 ' + d.date + '</small><br>' +
+    '<small>☀️ Illumination: ' + d.illumination + '%</small>' +
+    (d.nextNewMoon ? '<br><small>🌑 Next new moon: ~' + d.nextNewMoon + ' days</small>' : '') +
+    (d.nextFullMoon ? '<br><small>🌕 Next full moon: ~' + d.nextFullMoon + ' days</small>' : '');
+}
+
+function getPhaseEmoji(phase) {
+  if (phase < 0.03 || phase >= 0.97) return '🌑';
+  if (phase < 0.22) return '🌒';
+  if (phase < 0.28) return '🌓';
+  if (phase < 0.47) return '🌔';
+  if (phase < 0.53) return '🌕';
+  if (phase < 0.72) return '🌖';
+  if (phase < 0.78) return '🌗';
+  return '🌘';
+}
+
+function addPhaseBar(phase, name) {
+  const bar = document.createElement('div');
+  bar.className = 'message result';
+  bar.innerHTML = '<div class="phase-indicator">' +
+    '<div class="phase-icon">' + getPhaseEmoji(phase) + '</div>' +
+    '<div class="phase-info">' +
+      '<div class="phase-name">' + name + '</div>' +
+      '<div class="phase-detail">Cycle: ' + (phase * 100).toFixed(1) + '% complete</div>' +
+      '<div class="progress-bar"><div class="progress-fill" style="width:' + (phase * 100) + '%"></div></div>' +
+    '</div></div>';
+  messages.appendChild(bar);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function addMessage(type, html) {
+  const div = document.createElement('div');
+  div.className = 'message ' + type;
+  div.innerHTML = html;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function sendAction(action) {
+  ws.send(JSON.stringify({ action: action }));
+}
+
+function sendDate() {
+  const dateVal = document.getElementById('dateInput').value;
+  if (!dateVal) { sendAction('now'); return; }
+  const parts = dateVal.split('-');
+  ws.send(JSON.stringify({ action: 'date', year: parseInt(parts[0]), month: parseInt(parts[1]), day: parseInt(parts[2]) }));
+}
+
+// Auto-connect on load
+document.getElementById('dateInput').valueAsDate = new Date();
+</script>
+</body>
+</html>

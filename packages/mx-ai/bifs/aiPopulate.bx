@@ -1,0 +1,17 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — structured output population not available on WASM.
+	 */
+	function invoke(
+		required any target,
+		required string content
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiPopulate() is not available on MatchBox/WASM."
+		);
+	}
+
+}

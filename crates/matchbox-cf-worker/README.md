@@ -235,7 +235,7 @@ cp ../../shell/wrangler.toml ./
 # 4. Create package.json
 cat > package.json << 'EOF'
 {
-  "name": "myapp",
+  "name": "skybox-app",
   "scripts": {
     "build": "bash ../build.sh . MyListener.bx MyListener",
     "test:workerd": "node test_myapp.js",
@@ -255,7 +255,7 @@ npm run dev
 ## Wrangler Configuration
 
 ```toml
-name = "my-boxlang-ws-app"
+name = "skybox-app"
 main = "mcf-worker.js"
 compatibility_date = "2025-01-01"
 account_id = "your-account-id"

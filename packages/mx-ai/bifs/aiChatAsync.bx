@@ -1,0 +1,19 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Not available on MatchBox/WASM. No async future support on WASM.
+	 */
+	function invoke(
+		required any messages,
+		struct params = {},
+		struct options = {},
+		struct headers = {}
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiChatAsync() is not available on MatchBox/WASM. Use the Rust-level openRouterChat() BIF which yields synchronously via the callout bridge."
+		);
+	}
+
+}

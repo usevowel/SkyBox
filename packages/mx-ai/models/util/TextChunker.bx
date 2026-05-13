@@ -1,0 +1,254 @@
+class {
+
+	static {
+		DEFAULT_OPTIONS = {
+			chunkSize: 2000,
+			overlap: 200,
+			strategy: "recursive"
+		}
+		SEPARATOR = chr(10) & chr(10)
+	}
+
+	static function chunk( required string text, struct options = {} ) {
+		var config = arguments.options.append( static.DEFAULT_OPTIONS, false );
+
+		if ( config.overlap >= config.chunkSize ) {
+			throw(
+				type: "InvalidChunkConfiguration",
+				message: "Overlap (#config.overlap#) must be less than chunkSize (#config.chunkSize#)"
+			);
+		}
+
+		if ( !len( trim( arguments.text ) ) ) {
+			return [];
+		}
+
+		switch ( config.strategy.lcase() ) {
+			case "recursive":
+				return chunkRecursive( arguments.text, config );
+			case "characters":
+				return chunkByCharacters( arguments.text, config );
+			case "words":
+				return chunkByWords( arguments.text, config );
+			case "sentences":
+				return chunkBySentences( arguments.text, config );
+			case "paragraphs":
+				return chunkByParagraphs( arguments.text, config );
+			default:
+				throw(
+					type: "InvalidChunkStrategy",
+					message: "Unknown strategy: #config.strategy#"
+				);
+		}
+	}
+
+	private static function chunkRecursive( required string text, required struct config ) {
+		var chunks = [];
+		var paragraphs = reMatch( "[^\r\n]+(?:\r?\n\r?\n|$)", arguments.text );
+
+		if ( paragraphs.len() == 0 ) {
+			paragraphs = listToArray( arguments.text, chr(10) & chr(13), false, true );
+		}
+		if ( paragraphs.len() == 0 ) {
+			paragraphs = [ arguments.text ];
+		}
+
+		for ( var para in paragraphs ) {
+			para = trim( para );
+			if ( !len( para ) ) continue;
+
+			if ( len( para ) <= config.chunkSize ) {
+				chunks.append( para );
+			} else {
+				var sentences = reMatch( "[^.!?]+[.!?]+", para );
+				if ( sentences.len() == 0 ) {
+					sentences = [ para ];
+				}
+
+				var currentChunk = "";
+				for ( var sentence in sentences ) {
+					sentence = trim( sentence );
+					if ( !len( sentence ) ) continue;
+
+					if ( len( sentence ) > config.chunkSize ) {
+						if ( len( currentChunk ) ) {
+							chunks.append( trim( currentChunk ) );
+							currentChunk = "";
+						}
+						var words = reMatch( "[^\s]+", sentence );
+						var wordChunk = "";
+						for ( var word in words ) {
+							if ( len( word ) > config.chunkSize ) {
+								if ( len( wordChunk ) ) {
+									chunks.append( trim( wordChunk ) );
+									wordChunk = "";
+								}
+								var charChunks = chunkByCharacters( word, config );
+								chunks.append( charChunks, true );
+							} else if ( !len( wordChunk ) ) {
+								wordChunk = word;
+							} else if ( len( wordChunk ) + 1 + len( word ) <= config.chunkSize ) {
+								wordChunk = wordChunk & " " & word;
+							} else {
+								chunks.append( trim( wordChunk ) );
+								wordChunk = word;
+							}
+						}
+						if ( len( wordChunk ) ) {
+							chunks.append( trim( wordChunk ) );
+						}
+					} else {
+						if ( !len( currentChunk ) ) {
+							currentChunk = sentence;
+						} else if ( len( currentChunk ) + 1 + len( sentence ) <= config.chunkSize ) {
+							currentChunk = currentChunk & " " & sentence;
+						} else {
+							chunks.append( trim( currentChunk ) );
+							currentChunk = sentence;
+						}
+					}
+				}
+				if ( len( currentChunk ) ) {
+					chunks.append( trim( currentChunk ) );
+				}
+			}
+		}
+
+		if ( config.overlap > 0 && chunks.len() > 1 ) {
+			chunks = applyOverlap( chunks, config.overlap );
+		}
+
+		return chunks;
+	}
+
+	private static function applyOverlap( required array chunks, required numeric overlap ) {
+		if ( arguments.chunks.len() <= 1 || arguments.overlap <= 0 ) {
+			return arguments.chunks;
+		}
+		var overlappedChunks = [ arguments.chunks[ 1 ] ];
+		for ( var i = 2; i <= arguments.chunks.len(); i++ ) {
+			var previousChunk = arguments.chunks[ i - 1 ];
+			var currentChunk = arguments.chunks[ i ];
+			var overlapText = len( previousChunk ) > arguments.overlap
+				? mid( previousChunk, len( previousChunk ) - arguments.overlap + 1, arguments.overlap )
+				: previousChunk;
+			overlappedChunks.append( trim( overlapText ) & " " & trim( currentChunk ) );
+		}
+		return overlappedChunks;
+	}
+
+	private static function chunkByCharacters( required string text, required struct config ) {
+		var chunks = [];
+		var textLength = len( arguments.text );
+		var startPos = 1;
+
+		while ( startPos <= textLength ) {
+			var endPos = min( startPos + config.chunkSize - 1, textLength );
+			if ( endPos < textLength ) {
+				var separatorPos = findLastSeparator( arguments.text, startPos, endPos, " " );
+				if ( separatorPos > startPos ) {
+					endPos = separatorPos;
+				}
+			}
+			var chunk = trim( mid( arguments.text, startPos, endPos - startPos + 1 ) );
+			if ( len( chunk ) ) {
+				chunks.append( chunk );
+			}
+			startPos = endPos + 1 - config.overlap;
+		}
+
+		return chunks;
+	}
+
+	private static function findLastSeparator( required string text, required numeric startPos, required numeric endPos, required string separator ) {
+		var searchText = mid( arguments.text, arguments.startPos, arguments.endPos - arguments.startPos + 1 );
+		return searchText.lastIndexOf( arguments.separator ) >= 0
+			? arguments.startPos + searchText.lastIndexOf( arguments.separator )
+			: 0;
+	}
+
+	private static function chunkByWords( required string text, required struct config ) {
+		var words = reMatch( "\S+", arguments.text );
+		var chunks = [];
+		var currentChunk = [];
+
+		for ( var word in words ) {
+			currentChunk.append( word );
+			if ( currentChunk.len() >= config.chunkSize ) {
+				chunks.append( trim( currentChunk.toList( " " ) ) );
+				currentChunk = config.overlap > 0 && currentChunk.len() > config.overlap
+					? currentChunk.slice( currentChunk.len() - config.overlap + 1, config.overlap )
+					: [];
+			}
+		}
+
+		if ( currentChunk.len() > 0 ) {
+			var chunkText = trim( currentChunk.toList( " " ) );
+			if ( len( chunkText ) ) {
+				chunks.append( chunkText );
+			}
+		}
+
+		return chunks;
+	}
+
+	private static function chunkBySentences( required string text, required struct config ) {
+		var sentences = reMatch( "[^.!?]+[.!?]+", arguments.text );
+		if ( sentences.len() == 0 ) {
+			sentences = [ arguments.text ];
+		}
+		var chunks = [];
+		var currentChunk = [];
+
+		for ( var sentence in sentences ) {
+			currentChunk.append( sentence );
+			if ( currentChunk.len() >= config.chunkSize ) {
+				chunks.append( trim( currentChunk.toList( " " ) ) );
+				currentChunk = config.overlap > 0 && currentChunk.len() > config.overlap
+					? currentChunk.slice( currentChunk.len() - config.overlap + 1, config.overlap )
+					: [];
+			}
+		}
+
+		if ( currentChunk.len() > 0 ) {
+			var chunkText = trim( currentChunk.toList( " " ) );
+			if ( len( chunkText ) ) {
+				chunks.append( chunkText );
+			}
+		}
+
+		return chunks;
+	}
+
+	private static function chunkByParagraphs( required string text, required struct config ) {
+		var paragraphs = reMatch( "[^\r\n]+(?:\r?\n\r?\n|$)", arguments.text );
+		if ( paragraphs.len() == 0 ) {
+			paragraphs = listToArray( arguments.text, chr(10) & chr(13), false, true );
+		}
+		var chunks = [];
+		var currentChunk = [];
+
+		for ( var para in paragraphs ) {
+			para = trim( para );
+			if ( len( para ) ) {
+				currentChunk.append( para );
+				if ( currentChunk.len() >= config.chunkSize ) {
+					chunks.append( trim( currentChunk.toList( static.SEPARATOR ) ) );
+					currentChunk = config.overlap > 0 && currentChunk.len() > config.overlap
+						? currentChunk.slice( currentChunk.len() - config.overlap + 1, config.overlap )
+						: [];
+				}
+			}
+		}
+
+		if ( currentChunk.len() > 0 ) {
+			var chunkText = trim( currentChunk.toList( static.SEPARATOR ) );
+			if ( len( chunkText ) ) {
+				chunks.append( chunkText );
+			}
+		}
+
+		return chunks;
+	}
+
+}

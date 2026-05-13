@@ -206,7 +206,7 @@ component {
         writeFromTemplate(
             initDir & "wrangler.toml",
             dir & variables.SKYBOX_WRANGLER_TOML,
-            { "{{appName}}" : args.name }
+            { "{{appName}}" : "skybox-" & args.name }
         );
         result.messages.append( "Created: " & variables.SKYBOX_WRANGLER_TOML );
 
@@ -271,7 +271,7 @@ component {
         writeFromTemplate(
             appDir & "wrangler.toml",
             dir & variables.SKYBOX_WRANGLER_TOML,
-            { "{{appName}}" : args.name }
+            { "{{appName}}" : "skybox-" & args.name }
         );
         result.messages.append( "Created: " & variables.SKYBOX_WRANGLER_TOML );
 

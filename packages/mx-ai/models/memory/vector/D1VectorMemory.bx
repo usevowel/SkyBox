@@ -1,0 +1,185 @@
+class extends="BaseVectorMemory" {
+
+	function init(
+		required any adapter,
+		string key = createUUID(),
+		string userId = "",
+		string conversationId = "",
+		string collection = "ai_memory"
+	) {
+		super.init( argumentCollection: arguments );
+		ensureCollection();
+		return this;
+	}
+
+	IVectorMemory function ensureCollection() {
+		var sql = "CREATE TABLE IF NOT EXISTS vector_store_#variables.collection# (
+			id TEXT PRIMARY KEY,
+			text TEXT NOT NULL,
+			embedding TEXT NOT NULL,
+			metadata TEXT DEFAULT '{}',
+			user_id TEXT DEFAULT '',
+			conversation_id TEXT DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now'))
+		)";
+		try {
+			variables.adapter.execute( sql );
+		} catch ( any e ) {
+			// Table already exists
+		}
+		return this;
+	}
+
+	IVectorMemory function storeDocument(
+		required string id,
+		required string text,
+		required array embedding,
+		required struct metadata
+	) {
+		var embeddingJson = serializeJSON( arguments.embedding );
+		var metadataJson = serializeJSON( arguments.metadata );
+		var userId = arguments.metadata.keyExists( "userId" ) ? arguments.metadata.userId : "";
+		var conversationId = arguments.metadata.keyExists( "conversationId" ) ? arguments.metadata.conversationId : "";
+
+		var sql = "INSERT OR REPLACE INTO vector_store_#variables.collection#
+			(id, text, embedding, metadata, user_id, conversation_id)
+			VALUES (?, ?, ?, ?, ?, ?)";
+
+		variables.adapter.execute( sql, [
+			arguments.id,
+			arguments.text,
+			embeddingJson,
+			metadataJson,
+			userId,
+			conversationId
+		] );
+
+		return this;
+	}
+
+	array function searchByVector(
+		required array embedding,
+		required numeric limit,
+		required struct filter
+	) {
+		var sql = "SELECT id, text, embedding, metadata, user_id, conversation_id FROM vector_store_#variables.collection#";
+		var whereClauses = [];
+		var params = [];
+
+		if ( arguments.filter.keyExists( "userId" ) && len( arguments.filter.userId ) ) {
+			whereClauses.append( "user_id = ?" );
+			params.append( arguments.filter.userId );
+		}
+		if ( arguments.filter.keyExists( "conversationId" ) && len( arguments.filter.conversationId ) ) {
+			whereClauses.append( "conversation_id = ?" );
+			params.append( arguments.filter.conversationId );
+		}
+
+		if ( whereClauses.len() > 0 ) {
+			sql = sql & " WHERE " & whereClauses.toList( " AND " );
+		}
+
+		var rows = variables.adapter.query( sql, params );
+
+		var results = [];
+		for ( var row in rows ) {
+			var storedEmbedding = deserializeJSON( row.embedding );
+			var score = cosineSimilarity( arguments.embedding, storedEmbedding );
+			results.append( {
+				id: row.id,
+				score: score,
+				text: row.text,
+				metadata: row.metadata
+			} );
+		}
+
+		results.sort( function( a, b ) {
+			return b.score - a.score;
+		} );
+
+		if ( results.len() > arguments.limit ) {
+			return results.slice( 1, arguments.limit );
+		}
+
+		return results;
+	}
+
+	array function getAllDocuments() {
+		var sql = "SELECT id, text, embedding, metadata, user_id, conversation_id FROM vector_store_#variables.collection# ORDER BY created_at ASC";
+		var rows = variables.adapter.query( sql );
+		var docs = [];
+		for ( var row in rows ) {
+			docs.append( {
+				id: row.id,
+				text: row.text,
+				metadata: row.metadata,
+				vector: deserializeJSON( row.embedding )
+			} );
+		}
+		return docs;
+	}
+
+	struct function getDocumentById( required string id ) {
+		var sql = "SELECT id, text, embedding, metadata FROM vector_store_#variables.collection# WHERE id = ?";
+		var rows = variables.adapter.query( sql, [ arguments.id ] );
+		if ( rows.len() > 0 ) {
+			var row = rows[ 1 ];
+			return {
+				id: row.id,
+				text: row.text,
+				metadata: row.metadata,
+				vector: deserializeJSON( row.embedding )
+			};
+		}
+		return {};
+	}
+
+	boolean function deleteDocument( required string id ) {
+		var sql = "DELETE FROM vector_store_#variables.collection# WHERE id = ?";
+		var affected = variables.adapter.execute( sql, [ arguments.id ] );
+		return affected > 0;
+	}
+
+	numeric function deleteDocumentsByFilter( required struct filter ) {
+		var whereClauses = [];
+		var params = [];
+		if ( arguments.filter.keyExists( "userId" ) && len( arguments.filter.userId ) ) {
+			whereClauses.append( "user_id = ?" );
+			params.append( arguments.filter.userId );
+		}
+		if ( arguments.filter.keyExists( "conversationId" ) && len( arguments.filter.conversationId ) ) {
+			whereClauses.append( "conversation_id = ?" );
+			params.append( arguments.filter.conversationId );
+		}
+		if ( whereClauses.len() == 0 ) return 0;
+		var sql = "DELETE FROM vector_store_#variables.collection# WHERE " & whereClauses.toList( " AND " );
+		return variables.adapter.execute( sql, params );
+	}
+
+	IVectorMemory function clearCollection() {
+		var sql = "DELETE FROM vector_store_#variables.collection#";
+		variables.adapter.execute( sql );
+		return this;
+	}
+
+	IVectorMemory function createCollection( required string name ) {
+		variables.collection = arguments.name;
+		return ensureCollection();
+	}
+
+	boolean function collectionExists( required string name ) {
+		var sql = "SELECT name FROM sqlite_master WHERE type='table' AND name=?";
+		var rows = variables.adapter.query( sql, [ "vector_store_" & arguments.name ] );
+		return rows.len() > 0;
+	}
+
+	IVectorMemory function deleteCollection( required string name ) {
+		var sql = "DROP TABLE IF EXISTS vector_store_" & arguments.name;
+		variables.adapter.execute( sql );
+		if ( variables.collection == arguments.name ) {
+			variables.collection = "";
+		}
+		return this;
+	}
+
+}

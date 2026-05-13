@@ -1,0 +1,23 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — not implemented on WASM. Service provider model not available.
+	 */
+	function invoke(
+		string provider,
+		any apiKey,
+		any tools = [],
+		struct params = {},
+		struct options = {},
+		any middleware = [],
+		array skills = [],
+		array mcpServers = []
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiModel() is not available on MatchBox/WASM. The service-based provider model requires JVM BoxLang."
+		);
+	}
+
+}

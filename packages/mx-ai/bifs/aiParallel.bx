@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — parallel runnables not available on WASM.
+	 */
+	function invoke(required struct runnables) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiParallel() is not available on MatchBox/WASM."
+		);
+	}
+
+}

@@ -1,0 +1,20 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Not available on MatchBox/WASM. Use openRouterChat() — JS handles streaming via WebSocket.
+	 */
+	function invoke(
+		required any messages,
+		required function callback,
+		struct params = {},
+		struct options = {},
+		struct headers = {}
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiChatStream() is not available on MatchBox/WASM. Streaming is handled at the JS level via the callout bridge when using openRouterChat() BIF."
+		);
+	}
+
+}

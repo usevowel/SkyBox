@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — MCP server not available on WASM.
+	 */
+	function invoke() {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "MCPServer() is not available on MatchBox/WASM. MCP requires HTTP listener support."
+		);
+	}
+
+}

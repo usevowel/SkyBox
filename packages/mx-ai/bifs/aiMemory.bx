@@ -1,0 +1,54 @@
+@BoxBIF
+class {
+
+	function invoke(
+		string memory = "d1vector",
+		string key = "",
+		string userId = "",
+		string conversationId = "",
+		struct config = {}
+	) {
+		var bindingName = config.keyExists( "bindingName" ) ? config.bindingName : "DB";
+		var vectorizeBinding = config.keyExists( "vectorizeBinding" ) ? config.vectorizeBinding : "VECTORIZE";
+		var d1Binding = config.keyExists( "d1Binding" ) ? config.d1Binding : "DB";
+		var collection = config.keyExists( "collection" ) ? config.collection : "ai_memory";
+		var adapter;
+
+		switch ( arguments.memory.lcase() ) {
+			case "d1vector":
+				adapter = new D1Adapter( bindingName );
+				return new D1VectorMemory(
+					adapter: adapter,
+					key: arguments.key,
+					userId: arguments.userId,
+					conversationId: arguments.conversationId,
+					collection: collection
+				);
+			case "memory":
+				return new BoxVectorMemory(
+					adapter: "",
+					key: arguments.key,
+					userId: arguments.userId,
+					conversationId: arguments.conversationId,
+					collection: collection
+				);
+			case "vectorize":
+			case "cloudflare":
+				return new VectorizeMemory(
+					adapter: "",
+					key: arguments.key,
+					userId: arguments.userId,
+					conversationId: arguments.conversationId,
+					collection: collection,
+					vectorizeBinding: vectorizeBinding,
+					d1Binding: d1Binding
+				);
+			default:
+				throw(
+					type: "UnsupportedInMatchBox",
+					message: "Memory type '#arguments.memory#' not available on MatchBox/WASM. Use 'd1vector', 'memory', or 'vectorize'."
+				);
+		}
+	}
+
+}

@@ -1,0 +1,65 @@
+class {
+
+	property name="tableName";
+	property name="adapter";
+
+	function init( required string tableName, required any adapter ) {
+		variables.tableName = arguments.tableName;
+		variables.adapter = arguments.adapter;
+		return this;
+	}
+
+	array function findAll( string where = "", array params = [], string orderBy = "" ) {
+		var sql = "SELECT * FROM #variables.tableName#";
+		if ( len( arguments.where ) ) sql = sql & " WHERE " & arguments.where;
+		if ( len( arguments.orderBy ) ) sql = sql & " ORDER BY " & arguments.orderBy;
+		return variables.adapter.query( sql, arguments.params );
+	}
+
+	struct function findById( required string id ) {
+		var sql = "SELECT * FROM #variables.tableName# WHERE id = ?";
+		var rows = variables.adapter.query( sql, [ arguments.id ] );
+		if ( rows.len() > 0 ) return rows[ 1 ];
+		return {};
+	}
+
+	numeric function insert( required struct data ) {
+		var keys = [];
+		var placeholders = [];
+		var values = [];
+		for ( var key in arguments.data ) {
+			keys.append( key );
+			placeholders.append( "?" );
+			values.append( arguments.data[ key ] );
+		}
+		var sql = "INSERT INTO #variables.tableName# (#keys.toList( ',' )#) VALUES (#placeholders.toList( ',' )#)";
+		return variables.adapter.execute( sql, values );
+	}
+
+	numeric function update( required string id, required struct data ) {
+		var setClauses = [];
+		var values = [];
+		for ( var key in arguments.data ) {
+			setClauses.append( "#key# = ?" );
+			values.append( arguments.data[ key ] );
+		}
+		values.append( arguments.id );
+		var sql = "UPDATE #variables.tableName# SET #setClauses.toList( ',' )# WHERE id = ?";
+		return variables.adapter.execute( sql, values );
+	}
+
+	numeric function deleteById( required string id ) {
+		var sql = "DELETE FROM #variables.tableName# WHERE id = ?";
+		return variables.adapter.execute( sql, [ arguments.id ] );
+	}
+
+	numeric function deleteAll() {
+		var sql = "DELETE FROM #variables.tableName#";
+		return variables.adapter.execute( sql );
+	}
+
+	numeric function createTable( required string schemaSql ) {
+		return variables.adapter.execute( arguments.schemaSql );
+	}
+
+}

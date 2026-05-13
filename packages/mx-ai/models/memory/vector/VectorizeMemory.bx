@@ -1,0 +1,154 @@
+class extends="BaseVectorMemory" {
+
+	function init(
+		adapter = "",
+		string key = createUUID(),
+		string userId = "",
+		string conversationId = "",
+		string collection = "ai_memory",
+		string vectorizeBinding = "VECTORIZE",
+		string d1Binding = "DB"
+	) {
+		super.init( argumentCollection: arguments );
+		variables.vectorizeBinding = arguments.vectorizeBinding;
+		variables.d1Binding = arguments.d1Binding;
+		ensureCollection();
+		return this;
+	}
+
+	IVectorMemory function configure( required struct config ) {
+		super.configure( arguments.config );
+		if ( config.keyExists( "vectorizeBinding" ) ) variables.vectorizeBinding = config.vectorizeBinding;
+		if ( config.keyExists( "d1Binding" ) ) variables.d1Binding = config.d1Binding;
+		ensureCollection();
+		return this;
+	}
+
+	IVectorMemory function ensureCollection() {
+		var sql = "CREATE TABLE IF NOT EXISTS vector_store_#variables.collection# (
+			id TEXT PRIMARY KEY,
+			text TEXT NOT NULL,
+			metadata TEXT DEFAULT '{}',
+			user_id TEXT DEFAULT '',
+			conversation_id TEXT DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now'))
+		)";
+		try {
+			d1Execute( variables.d1Binding, sql );
+		} catch ( any e ) {}
+		return this;
+	}
+
+	IVectorMemory function storeDocument(
+		required string id,
+		required string text,
+		required array embedding,
+		required struct metadata
+	) {
+		var metadataJson = serializeJSON( arguments.metadata );
+		var userId = arguments.metadata.keyExists( "userId" ) ? arguments.metadata.userId : "";
+		var convId = arguments.metadata.keyExists( "conversationId" ) ? arguments.metadata.conversationId : "";
+
+		var sql = "INSERT OR REPLACE INTO vector_store_#variables.collection#
+			(id, text, metadata, user_id, conversation_id)
+			VALUES (?, ?, ?, ?, ?)";
+		d1Execute( variables.d1Binding, sql,
+			[ arguments.id, arguments.text, metadataJson, userId, convId ] );
+
+		var vectors = serializeJSON( [ {
+			id: arguments.id,
+			values: arguments.embedding,
+			metadata: { userId: userId, conversationId: convId }
+		} ] );
+		mxaiVectorizeUpsert( variables.vectorizeBinding, vectors );
+
+		return this;
+	}
+
+	private array function searchByVector(
+		required array embedding,
+		required numeric limit,
+		required struct filter
+	) {
+		var filterJson = serializeJSON( arguments.filter );
+		var vectorJson = serializeJSON( arguments.embedding );
+		var result = mxaiVectorizeQuery( variables.vectorizeBinding, vectorJson, arguments.limit, filterJson );
+
+		var matches = result.matches ?: [];
+		return matches.map( function( match ) {
+			var doc = getDocumentById( match.id );
+			return {
+				id: match.id,
+				text: doc.keyExists( "text" ) ? doc.text : "",
+				score: match.score,
+				metadata: match.metadata,
+				embedding: match.values ?: []
+			};
+		} );
+	}
+
+	array function getAllDocuments() {
+		var sql = "SELECT * FROM vector_store_#variables.collection# ORDER BY created_at DESC";
+		return d1Query( variables.d1Binding, sql );
+	}
+
+	struct function getDocumentById( required string id ) {
+		var sql = "SELECT * FROM vector_store_#variables.collection# WHERE id = ?";
+		var results = d1Query( variables.d1Binding, sql, [ arguments.id ] );
+		if ( results.len() == 0 ) return {};
+		var row = results[ 1 ];
+		return {
+			id: row.id ?: "",
+			text: row.text ?: "",
+			metadata: {},
+			embedding: []
+		};
+	}
+
+	boolean function deleteDocument( required string id ) {
+		var sql = "DELETE FROM vector_store_#variables.collection# WHERE id = ?";
+		d1Execute( variables.d1Binding, sql, [ arguments.id ] );
+		mxaiVectorizeDeleteByIds( variables.vectorizeBinding,
+			serializeJSON( [ arguments.id ] ) );
+		return true;
+	}
+
+	numeric function deleteDocumentsByFilter( required struct filter ) {
+		var conditions = [];
+		var params = [];
+		if ( filter.keyExists( "userId" ) && len( filter.userId ) ) {
+			conditions.append( "user_id = ?" );
+			params.append( filter.userId );
+		}
+		if ( filter.keyExists( "conversationId" ) && len( filter.conversationId ) ) {
+			conditions.append( "conversation_id = ?" );
+			params.append( filter.conversationId );
+		}
+
+		if ( conditions.len() == 0 ) return 0;
+
+		var sql = "SELECT id FROM vector_store_#variables.collection# WHERE "
+			& conditions.toList( " AND " );
+		var docs = d1Query( variables.d1Binding, sql, params );
+
+		if ( docs.len() > 0 ) {
+			var ids = docs.map( function( d ) { return d.id; } );
+			mxaiVectorizeDeleteByIds( variables.vectorizeBinding,
+				serializeJSON( ids ) );
+
+			sql = "DELETE FROM vector_store_#variables.collection# WHERE "
+				& conditions.toList( " AND " );
+			d1Execute( variables.d1Binding, sql, params );
+		}
+
+		return docs.len();
+	}
+
+	IVectorMemory function clearCollection() {
+		mxaiVectorizeDeleteByIds( variables.vectorizeBinding, "[]" ); // Clear Vectorize
+		var sql = "DELETE FROM vector_store_#variables.collection#";
+		d1Execute( variables.d1Binding, sql );
+		return this;
+	}
+
+}

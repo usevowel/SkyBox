@@ -1,0 +1,18 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — audio translation not available on WASM.
+	 */
+	function invoke(
+		required any audio,
+		struct params = {},
+		struct options = {}
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiTranslate() is not available on MatchBox/WASM."
+		);
+	}
+
+}

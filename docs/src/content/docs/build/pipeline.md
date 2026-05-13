@@ -48,9 +48,58 @@ The `cf-worker-builder` CLI tool:
 cp bindgen/matchbox_cf_worker.js wasm_glue.js
 ```
 
+## Static Assets (Optional)
+
+For apps with a Web UI (like the chatroom demo), static assets (CSS, JS, images) are served via Cloudflare's `[assets]` feature:
+
+```
+example/
+├── assets/
+│   ├── css/
+│   │   └── style.css          # Source assets
+│   └── js/
+│       └── chat.js
+├── build-multi.sh              # Multi-file build with asset copy step
+├── dist/
+│   ├── worker.wasm             # Compiled WASM
+│   └── assets/                 # Copied during build
+│       ├── css/style.css
+│       └── js/chat.js
+└── wrangler.toml               # [assets] section points to dist/assets
+```
+
+The build copies `assets/` → `dist/assets/` before running the standard pipeline:
+
+```bash
+# In build-multi.sh:
+mkdir -p dist/assets/css dist/assets/js
+cp -rf assets/css/* dist/assets/css/
+cp -rf assets/js/*  dist/assets/js/
+```
+
+The `wrangler.toml` `[assets]` section tells Cloudflare to serve files at the edge:
+
+```toml
+[assets]
+directory = "dist/assets"
+```
+
+- Requests to `/css/style.css` serve `dist/assets/css/style.css`
+- Requests to `/js/chat.js` serve `dist/assets/js/chat.js`
+- The Worker `fetch()` has a fallback: `if (url.pathname.startsWith('/assets/') && env.ASSETS) return env.ASSETS.fetch(request)`
+
+## Multi-File Builds
+
+For complex apps with multiple `.bx` source files, a `build-multi.sh` script concatenates all sources before the standard pipeline:
+
+1. Concatenate all `.bx` files (e.g. `src/listeners/ChatRoom.bx`, `src/handlers/MessageRouter.bx`)
+2. Copy `assets/` → `dist/assets/`
+3. Run standard build pipeline on the merged source
+
 ## Output
 
 | File | Size | Content |
 |------|------|---------|
 | `dist/worker.wasm` | ~1.3 MB | BoxLang VM + your bytecode |
 | `wasm_glue.js` | ~37 KB | wasm-bindgen JS bindings |
+| `dist/assets/` | varies | Static files (CSS, JS) served at edge |

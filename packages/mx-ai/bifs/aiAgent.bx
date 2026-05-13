@@ -1,0 +1,32 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — agents not available on WASM.
+	 */
+	function invoke(
+		string name = "BxAi",
+		string description = "",
+		string instructions = "",
+		any model,
+		any memory,
+		array tools = [],
+		array subAgents = [],
+		any skills = [],
+		any availableSkills = [],
+		struct params = {},
+		struct options = {},
+		any middleware = [],
+		any checkpointer,
+		numeric checkpointTTL = 30,
+		array mcpServers = [],
+		boolean register = false,
+		string module = ""
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiAgent() is not available on MatchBox/WASM. The agent runtime requires JVM BoxLang."
+		);
+	}
+
+}

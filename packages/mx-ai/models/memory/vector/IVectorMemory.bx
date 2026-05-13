@@ -1,0 +1,44 @@
+interface {
+
+	array function getRelevant(
+		required string query,
+		numeric limit = 5,
+		struct filter = {},
+		numeric minScore = 0.0,
+		string userId = "",
+		string conversationId = ""
+	);
+
+	array function findSimilar(
+		required array embedding,
+		numeric limit = 5,
+		struct filter = {},
+		string userId = "",
+		string conversationId = ""
+	);
+
+	IVectorMemory function addWithId(
+		required string id,
+		required string text,
+		struct metadata = {},
+		string userId = "",
+		string conversationId = ""
+	);
+
+	IVectorMemory function add( required any message, string userId = "", string conversationId = "" );
+
+	array function getAll( string userId = "", string conversationId = "" );
+
+	numeric function count( string userId = "", string conversationId = "" );
+
+	IVectorMemory function clear( string userId = "", string conversationId = "" );
+
+	struct function getById( required string id );
+
+	boolean function remove( required string id );
+
+	numeric function removeWhere( required struct filter );
+
+	struct function seed( required array documents, string userId = "", string conversationId = "" );
+
+}

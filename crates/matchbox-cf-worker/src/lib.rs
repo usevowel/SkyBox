@@ -15,7 +15,10 @@
 //! | `vm_on_message` | DO.webSocketMessage() | Call `onMessage` on the BoxLang listener |
 //! | `vm_on_close` | DO.webSocketClose() | Call `onClose` on the BoxLang listener |
 //! | `vm_get_state` | DO after message | Serialize listener state for DO storage |
+//! | `vm_on_http_request` | DO.fetch() for HTTP | Call `onHttpGet` on the BoxLang listener and return HTML/JSON |
+//! | `vm_complete_async` | DO after D1 resolve | Inject async D1 results and resume VM |
 
+pub mod bifs;
 pub mod build;
 pub mod channel;
 pub mod do_adapter;

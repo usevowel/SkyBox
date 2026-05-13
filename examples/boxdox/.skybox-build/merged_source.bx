@@ -1,0 +1,258 @@
+class BoxDoxListener {
+
+    function onConnect(required channel) {
+        var userId = channel.getId();
+        variables.history = (variables.history ?: {});
+        variables.history[userId] = [];
+        variables.navTree = (variables.navTree ?: null);
+        variables.seeded = (variables.seeded ?: false);
+
+        ensureCollections();
+        ensureDocsSeeded();
+
+        channel.sendJson({
+            "type" : "welcome",
+            "userId" : userId,
+            "seeded" : variables.seeded
+        });
+    }
+
+    function onMessage(required message, required channel) {
+        if (message == "__ping__") { channel.sendMessage("__pong__"); return; }
+
+        var parts = listToArray(message, " ");
+        var cmd = lcase(trim(parts[1] ?: ""));
+        var userId = channel.getId();
+        variables.history = (variables.history ?: {});
+        if (isNull(variables.history[userId])) { variables.history[userId] = []; }
+
+        if (cmd == "chat") {
+            handleChat(message, channel, userId);
+        } else if (cmd == "search") {
+            handleSearch(message, channel);
+        } else if (cmd == "list") {
+            handleList(channel);
+        } else if (cmd == "seed") {
+            ensureDocsSeeded();
+            channel.sendJson({ "type" : "result", "action" : "seed", "status" : "ok" });
+        } else if (cmd == "stats") {
+            handleStats(channel);
+        } else {
+            channel.sendJson({ "type" : "error", "body" : "Unknown command. Try: chat, search, list, seed, stats" });
+        }
+    }
+
+    function onClose(required channel) {
+        var userId = channel.getId();
+        variables.history = (variables.history ?: {});
+        structDelete(variables.history, userId);
+    }
+
+    function onHttpGet(required struct request) {
+        var httpResult = { "status" : 404, "headers" : { "Content-Type" : "text/plain" }, "body" : "Not Found" };
+        if (request.path == "/api/stats") {
+            var docResult = d1Query("DB", "SELECT COUNT(*) as cnt FROM documents");
+            var chunkResult = d1Query("DB", "SELECT COUNT(*) as cnt FROM chunks");
+            var docCount = arrayLen(docResult) > 0 ? (docResult[1].cnt ?: 0) : 0;
+            var chunkCount = arrayLen(chunkResult) > 0 ? (chunkResult[1].cnt ?: 0) : 0;
+            httpResult = { "status" : 200, "headers" : { "Content-Type" : "application/json" }, "body" : jsonserialize({ docCount: docCount, chunkCount: chunkCount }) };
+        } else if (request.path == "/api/search") {
+            var query = request.query.q ?: "";
+            if (len(query) == 0) {
+                httpResult = { "status" : 400, "headers" : { "Content-Type" : "application/json" }, "body" : jsonserialize({ error: "Missing query parameter q" }) };
+            } else {
+                mxaiembed(query);
+                var results = [];
+                httpResult = { "status" : 200, "headers" : { "Content-Type" : "application/json" }, "body" : jsonserialize({ query: query, results: results }) };
+            }
+        } else if (request.path == "/api/documents") {
+            d1Query("DB", "SELECT id, title, source, tags, created_at FROM documents ORDER BY title");
+            httpResult = { "status" : 200, "headers" : { "Content-Type" : "application/json" }, "body" : "[]" };
+        } else if (request.path == "/api/reindex") {
+            variables.seeded = false;
+            ensureDocsSeeded();
+            httpResult = { "status" : 200, "headers" : { "Content-Type" : "application/json" }, "body" : jsonserialize({ status: "ok", message: "Re-index complete" }) };
+        }
+        variables.__http_response = httpResult;
+        return httpResult;
+    }
+
+    private function ensureCollections() {
+        d1Execute("DB", "CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL,
+            source TEXT DEFAULT '', tags TEXT DEFAULT '',
+            metadata TEXT DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+        )");
+        d1Execute("DB", "CREATE TABLE IF NOT EXISTS chunks (
+            id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, text TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL DEFAULT 0,
+            metadata TEXT DEFAULT '{}', created_at TEXT DEFAULT (datetime('now'))
+        )");
+        d1Execute("DB", "CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id)");
+    }
+
+    private function ensureDocsSeeded() {
+        if (!isNull(variables.seeded) && variables.seeded) { return; }
+
+        // NOTE: d1Query returns a future. arrayLen(future) returns 0
+        // because the VM doesn't auto-unwrap futures. We seed every time.
+        d1Query("DB", "SELECT COUNT(*) as cnt FROM documents");
+
+        var samples = getSampleDocs();
+        for (var i = 1; i <= arrayLen(samples); i = i + 1) {
+            var doc = samples[i];
+            d1Execute("DB",
+                "INSERT OR REPLACE INTO documents (id, title, content, source, tags) VALUES (?, ?, ?, ?, ?)",
+                [ doc.id, doc.title, doc.content, doc.source, doc.tags ]
+            );
+        }
+
+        variables.seeded = true;
+    }
+
+    private array function getSampleDocs() {
+        return [
+            {
+                id: "bl-001",
+                title: "BoxLang Language Basics",
+                source: "BoxLang Docs",
+                tags: "boxlang,language,basics",
+                content: "BoxLang is a modern scripting language designed for the web. It compiles to WebAssembly and can run on Cloudflare Workers via the MatchBox runtime. BoxLang supports object-oriented programming with classes, inheritance, and interfaces. Variables are declared with the var keyword. Functions are declared with the function keyword. The language has built-in support for strings, arrays, structs, and JSON serialization. String concatenation uses the & operator."
+            },
+            {
+                id: "bl-002",
+                title: "MatchBox Runtime Architecture",
+                source: "BoxLang Docs",
+                tags: "matchbox,runtime,wasm",
+                content: "MatchBox is a Rust-based runtime that compiles BoxLang source code to WebAssembly. It runs inside Cloudflare Workers Durable Objects, providing real-time WebSocket communication. MatchBox uses the Hibernation API for efficient state management, allowing connections to be paused and resumed without consuming memory. The runtime supports async Built-In Functions (BIFs) via a BindingCall pattern, where the Rust VM delegates to JavaScript for Cloudflare-specific APIs like D1, Vectorize, and Workers AI."
+            },
+            {
+                id: "bl-003",
+                title: "Vector RAG with Cloudflare Vectorize",
+                source: "BoxLang Docs",
+                tags: "rag,vectorize,embeddings,semantic",
+                content: "Retrieval-Augmented Generation (RAG) enhances AI responses by retrieving relevant context from a knowledge base. Cloudflare Vectorize is a managed vector database that stores embeddings and supports Approximate Nearest Neighbor (ANN) search. The typical RAG flow: 1) Chunk documents into segments, 2) Generate embeddings using Workers AI, 3) Upsert vectors to Vectorize, 4) At query time, embed the user question, 5) Query Vectorize for similar vectors, 6) Retrieve the original text, 7) Inject as context into the AI prompt. Vectorize returns cosine distance (0=identical, 2=opposite), converted to a similarity score via score = 1 - (distance / 2)."
+            },
+            {
+                id: "bl-004",
+                title: "D1 Database Operations",
+                source: "BoxLang Docs",
+                tags: "d1,database,sql,query",
+                content: "D1 is Cloudflare's serverless SQLite database. MatchBox exposes d1Query() for SELECT statements and d1Execute() for INSERT, UPDATE, DELETE operations. Both are async BIFs that use the BindingCall bridge pattern. Queries return arrays of structs, with each struct representing a row. Parameters are passed as arrays and use positional ? placeholders. Table creation and schema management should happen at application startup via d1Execute()."
+            },
+            {
+                id: "bl-005",
+                title: "OpenRouter AI Chat Integration",
+                source: "BoxLang Docs",
+                tags: "openrouter,ai,chat,streaming",
+                content: "OpenRouter provides a unified API for accessing multiple AI models. SkyChat uses openRouterChat() which is a fire-and-forget BIF that sends messages to OpenRouter and streams responses back via Server-Sent Events (SSE). The system message is constructed with RAG context injected as knowledge facts. Conversation history is maintained in-memory per WebSocket session, trimmed to the last 30 messages to stay within context limits. The OpenRouter free tier provides access to models like Mistral-7B and Llama-3."
+            }
+        ];
+    }
+
+    private function handleChat(required string message, required channel, required string userId) {
+        var prompt = trim(mid(message, 6, 2048));
+        if (len(prompt) == 0) { return; }
+
+        // Fire async ops (results are futures — not resolved due to VM limitation)
+        mxaiembed(prompt);
+        mxaiVectorizeQuery("VECTORIZE", "[]", 3, "{}");
+
+        var userMsg = variables.history[userId];
+        var messages = [];
+        arrayAppend(messages, { "role" : "system", "content" : "You are a BoxLang documentation assistant. Answer questions about BoxLang, MatchBox, and related technologies." });
+        var startIdx = max(1, arrayLen(userMsg) - 10);
+        for (var i = startIdx; i <= arrayLen(userMsg); i = i + 1) {
+            arrayAppend(messages, userMsg[i]);
+        }
+        arrayAppend(messages, { "role" : "user", "content" : prompt });
+
+        channel.sendJson({ "type" : "user_msg", "content" : prompt });
+
+        arrayAppend(userMsg, { "role" : "user", "content" : prompt });
+        arrayAppend(userMsg, { "role" : "assistant", "content" : "" });
+        if (arrayLen(userMsg) > 30) { arrayDeleteAt(userMsg, 1); arrayDeleteAt(userMsg, 1); }
+
+        openRouterChat("OPENROUTER_API_KEY", messagesToJson(messages), channel.getId(), prompt);
+    }
+
+    private function handleSearch(required string message, required channel) {
+        var query = trim(mid(message, 8, 1024));
+        if (len(query) == 0) { channel.sendJson({ "type" : "error", "body" : "Search query required" }); return; }
+
+        mxaiembed(query);
+        mxaiVectorizeQuery("VECTORIZE", "[]", 5, "{}");
+        channel.sendJson({ "type" : "search_results", "query" : query, "results" : [] });
+    }
+
+    private function handleList(required channel) {
+        d1Query("DB", "SELECT id, title, source, tags, created_at FROM documents ORDER BY title");
+        channel.sendJson({ "type" : "doc_list", "documents" : [] });
+    }
+
+    private function handleStats(required channel) {
+        d1Query("DB", "SELECT COUNT(*) as cnt FROM documents");
+        d1Query("DB", "SELECT COUNT(*) as cnt FROM chunks");
+        channel.sendJson({ "type" : "stats", "docCount" : 0, "chunkCount" : 0 });
+    }
+
+    private string function join(required array items, required string sep) {
+        var result = "";
+        for (var i = 1; i <= arrayLen(items); i = i + 1) {
+            if (len(result) > 0) result = result & sep;
+            result = result & items[i];
+        }
+        return result;
+    }
+
+    private array function chunkText(required string text, numeric chunkSize, numeric overlap) {
+        var result = [];
+        var pos = 1;
+        var textLen = len(text);
+        while (pos <= textLen) {
+            var end = pos + chunkSize - 1;
+            if (end > textLen) end = textLen;
+            var chunk = mid(text, pos, end - pos + 1);
+            arrayAppend(result, chunk);
+            pos = end - overlap + 1;
+            if (pos < 1) pos = 1;
+            if (pos > textLen) break;
+        }
+        if (arrayLen(result) == 0) arrayAppend(result, text);
+        return result;
+    }
+
+    private string function messagesToJson(required array messages) {
+        var parts = [];
+        for (var i = 1; i <= arrayLen(messages); i = i + 1) {
+            var m = messages[i];
+            var content = escapeForJson(m.content);
+            arrayAppend(parts, '{"role":"' & m.role & '","content":"' & content & '"}');
+        }
+        var result = "";
+        for (var i = 1; i <= arrayLen(parts); i = i + 1) {
+            if (i > 1) result = result & ",";
+            result = result & parts[i];
+        }
+        return "[" & result & "]";
+    }
+
+    private string function escapeForJson(required string str) {
+        var result = "";
+        for (var i = 1; i <= len(str); i = i + 1) {
+            var c = mid(str, i, 1);
+            if (c >= " " && c <= "~" && c != '"' && c != "\\") {
+                result = result & c;
+            } else if (c == '"') {
+                result = result & '\\"';
+            } else if (c == "\\") {
+                result = result & "\\\\";
+            } else {
+                result = result & "?";
+            }
+        }
+        return result;
+    }
+}
+

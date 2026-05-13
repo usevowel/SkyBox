@@ -51,3 +51,56 @@ To bring `aiTool.bx` and `aiAgent.bx` from stub to functional:
 4. **BoxLang BIF**: `aiTool.bx` creates a tool struct and registers via `__skybox_binding_call`
 5. **AI integration**: Modify `streamOpenRouter()` to include tool definitions in the API call
 6. **Tool results**: `sendMessage()` fallback for tool results (returned to AI, not user)
+
+## Vectorize-backed RAG (This Epic)
+
+MXAI RAG uses **Vectorize** (Cloudflare's managed vector DB) instead of hand-rolled cosine similarity. Two Rust→JS bridge BIFs power it:
+
+| BIF | Rust (`bifs.rs`) | JS (`mcf-worker.js`) | Description |
+|-----|------------------|----------------------|-------------|
+| `mxaiVectorizeUpsert(bindingName, vectors)` | `vectorize_upsert` action | `handleVectorizeUpsert()` — calls `env.VECTORIZE.upsert(vectors)` | Insert/update vectors |
+| `mxaiVectorizeQuery(bindingName, queryVector, topK, options)` | `vectorize_query` action | `handleVectorizeQuery()` — calls `env.VECTORIZE.query(queryVector, {topK, returnMetadata, returnValues})` | Search nearest vectors |
+
+**Wranger config:**
+```toml
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "skybox-<app>-index"
+```
+
+**Create index:**
+```bash
+npx wrangler vectorize create skybox-<app>-index --dimensions=768 --metric=cosine
+```
+
+### Score Conversion (CRITICAL)
+
+BXAI expects scores as 0.0-1.0 where higher = more similar. Vectorize uses cosine distance:
+- Vectorize distance: 0 = identical, 1 = orthogonal, 2 = opposite
+- BXAI score: `1 - (vectorizeDistance / 2)`
+- Always return scores in BXAI format (0-1, higher=better)
+
+### VectorizeMemory.bx (BoxLang Wrapper)
+
+The VectorizeMemory.bx class wraps the Rust BIFs to match BXAI's `IVectorMemory` interface:
+
+```
+mxaiVectorizeUpsert/Query (Rust BIFs)
+    ↕ BindingCall bridge
+handleVectorizeUpsert/Query (DO methods)
+    ↕ env.VECTORIZE.upsert/query (Cloudflare API)
+VectorizeMemory.bx (BoxLang class, mirrors IVectorMemory)
+    ↕ used by skychat and boxdox demos
+```
+
+### Porting RAG BIFs from BXAI to MXAI
+
+| BXAI Source | MXAI Target | Level | Notes |
+|-------------|-------------|-------|-------|
+| `bifs/aiMemory.bx` | `bifs/aiMemory.bx` | Pure-BoxLang port | Factory that picks VectorizeMemory for "vector" types |
+| `models/memory/vector/IVectorMemory.bx` | `models/memory/IVectorMemory.bx` | Pass-through | Interface definition, pure BoxLang |
+| `models/memory/vector/BaseVectorMemory.bx` | `models/memory/VectorizeMemory.bx` | Rust→JS bridge | Replaces abstract base with Vectorize-backed impl |
+| `models/util/TextChunker.bx` | `models/util/TextChunker.bx` | Pass-through | Pure BoxLang, no changes needed |
+| `bifs/aiChunk.bx` | `bifs/aiChunk.bx` | Pass-through | Pure BoxLang, no changes needed |
+| `models/loaders/Document.bx` | `models/loaders/Document.bx` | Pass-through | Pure BoxLang value object |
+| `bifs/aiDocuments.bx` | `bifs/aiDocuments.bx` | Pass-through (stub loaders) | Factory is pure; file loaders need stubs |

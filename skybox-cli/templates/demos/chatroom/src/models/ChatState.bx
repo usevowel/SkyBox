@@ -1,0 +1,86 @@
+// ── ChatState — Shared Chat State Manager ─────────────────────────────
+// Manages persistent state across DO hibernation cycles.
+// All access goes through variables.xxx with lazy init pattern.
+
+class ChatState {
+
+    /**
+     * Get or initialize a room
+     */
+    function ensureRoom(required string name) {
+        variables.rooms = variables.rooms ?: {};
+        if (isNull(variables.rooms[name])) {
+            variables.rooms[name] = [];
+        }
+        return variables.rooms[name];
+    }
+
+    /**
+     * Add user to a room
+     */
+    function addUserToRoom(required string roomName, required string userId) {
+        var room = ensureRoom(roomName);
+        arrayAppend(room, userId);
+    }
+
+    /**
+     * Remove user from a room
+     */
+    function removeUserFromRoom(required string roomName, required string userId) {
+        variables.rooms = variables.rooms ?: {};
+        var room = variables.rooms[roomName] ?: [];
+        var idx = 1;
+        while (idx <= arrayLen(room)) {
+            if (room[idx] == userId) {
+                arrayDeleteAt(room, idx);
+                break;
+            }
+            idx = idx + 1;
+        }
+    }
+
+    /**
+     * Get room member count
+     */
+    function roomCount(required string roomName) {
+        variables.rooms = variables.rooms ?: {};
+        return arrayLen(variables.rooms[roomName] ?: []);
+    }
+
+    /**
+     * Register a user
+     */
+    function registerUser(required string userId, required struct info) {
+        variables.users = variables.users ?: {};
+        variables.users[userId] = info;
+    }
+
+    /**
+     * Get a user
+     */
+    function getUser(required string userId) {
+        variables.users = variables.users ?: {};
+        return variables.users[userId] ?: {};
+    }
+
+    /**
+     * Remove a user
+     */
+    function removeUser(required string userId) {
+        variables.users = variables.users ?: {};
+        structDelete(variables.users, userId);
+    }
+
+    /**
+     * Add a chat message to history
+     */
+    function addMessage(required struct msg) {
+        variables.messages = variables.messages ?: [];
+        arrayAppend(variables.messages, msg);
+        // Keep last 50
+        if (arrayLen(variables.messages) > 50) {
+            arrayDeleteAt(variables.messages, 1);
+        }
+    }
+
+}

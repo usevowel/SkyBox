@@ -1,0 +1,177 @@
+class TodoApp {
+
+    function onHttpGet(required struct request) {
+        var method = request.method;
+        var path = request.path;
+
+        if (method == "GET" && (path == "/" || path == "")) {
+            return servePage();
+        }
+
+        if (path == "/api/todos" && method == "GET") {
+            return serveGetAll();
+        }
+
+        if (path == "/api/todos" && method == "POST") {
+            return servePost(request);
+        }
+
+        if (path == "/api/todos" && method == "DELETE") {
+            variables.todos = [];
+            return resp(200, "application/json", '{"message":"All deleted"}');
+        }
+
+        var parts = listToArray(path, "/");
+        var id = "";
+        if (arrayLen(parts) >= 4 && parts[1] == "" && parts[2] == "api" && parts[3] == "todos") {
+            id = parts[4];
+        }
+
+        if (id != "" && method == "GET") {
+            return serveGetById(id);
+        }
+
+        if (id != "" && (method == "POST" || method == "PUT" || method == "PATCH")) {
+            return serveUpdate(id, request);
+        }
+
+        if (id != "" && method == "DELETE") {
+            return serveDelete(id);
+        }
+
+        return resp(404, "application/json", '{"error":"Not found"}');
+    }
+
+    function serveGetAll() {
+        var todos = variables.todos ?: [];
+        var json = '{"todos":[';
+        for (var i = 1; i <= arrayLen(todos); i = i + 1) {
+            if (i > 1) { json = json & ","; }
+            json = json & todoToJson(todos[i]);
+        }
+        json = json & '],"total":' & toString(arrayLen(todos)) & "}";
+        return resp(200, "application/json", json);
+    }
+
+    function serveGetById(required string id) {
+        var todos = variables.todos ?: [];
+        for (var i = 1; i <= arrayLen(todos); i = i + 1) {
+            if (todos[i].id & "" == id) {
+                return resp(200, "application/json", '{"todo":' & todoToJson(todos[i]) & "}");
+            }
+        }
+        return resp(404, "application/json", '{"error":"Not found"}');
+    }
+
+    function servePost(required struct request) {
+        var text = request["body"] & "";
+        if (len(text) == 0) { return resp(400, "application/json", '{"error":"text required"}'); }
+
+
+
+        var todos = variables.todos ?: [];
+        var maxId = 0;
+        for (var i = 1; i <= arrayLen(todos); i = i + 1) {
+            if (todos[i].id > maxId) { maxId = todos[i].id; }
+        }
+        var newId = maxId + 1;
+        var newTodo = {"id": newId, "text": text, "completed": false};
+        arrayAppend(todos, newTodo);
+        variables.todos = todos;
+        return resp(201, "application/json", '{"message":"Created","id":' & toString(newId) & '}');
+    }
+
+    function serveUpdate(required string id, required struct request) {
+        var todos = variables.todos ?: [];
+        var idx = 0;
+        for (var i = 1; i <= arrayLen(todos); i = i + 1) {
+            if (todos[i].id & "" == id) { idx = i; break; }
+        }
+        if (idx == 0) { return resp(404, "application/json", '{"error":"Not found"}'); }
+
+        todos[idx].text = toString(request["body"]);
+
+        variables.todos = todos;
+        return resp(200, "application/json", '{"message":"Updated"}');
+    }
+
+    function serveDelete(required string id) {
+        var todos = variables.todos ?: [];
+        var newTodos = [];
+        for (var i = 1; i <= arrayLen(todos); i = i + 1) {
+            if (todos[i].id & "" != id) { arrayAppend(newTodos, todos[i]); }
+        }
+        variables.todos = newTodos;
+        return resp(200, "application/json", '{"message":"Deleted"}');
+    }
+
+    function todoToJson(required struct t) {
+        var json = "{";
+        json = json & '"id":' & toString(t.id) & ",";
+        json = json & '"text":' & q(toString(t.text)) & ",";
+        var done = "false";
+        if (t.completed) { done = "true"; }
+        json = json & '"completed":' & done;
+        json = json & "}";
+        return json;
+    }
+
+    function q(required string s) {
+        var dq = '"';
+        var bs = '\';
+        var out = dq;
+        for (var i = 1; i <= len(s); i = i + 1) {
+            var c = mid(s, i, 1);
+            if (c == dq || c == bs) { out = out & bs & c; }
+            else { out = out & c; }
+        }
+        out = out & dq;
+        return out;
+    }
+
+    function servePage() {
+        var css = "*{margin:0;padding:0;box-sizing:border-box}";
+        css = css & "body{font-family:system-ui,sans-serif;background:##0f172a;color:##e2e8f0}";
+        css = css & "h1{text-align:center;padding:16px}";
+        css = css & ".frm{display:flex;gap:8px;padding:16px;max-width:600px;margin:0 auto}";
+        css = css & "input[type=text]{flex:1;padding:8px;border:1px solid ##475569;border-radius:4px;background:##1e293b;color:##e2e8f0}";
+        css = css & ".btn{padding:8px 16px;border:none;border-radius:4px;background:##f97316;color:##fff;cursor:pointer}";
+        css = css & "ul{list-style:none;max-width:600px;margin:0 auto;padding:0 16px}";
+        css = css & "li{display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid ##1e293b}";
+        css = css & ".done span{text-decoration:line-through;color:##64748b}";
+        css = css & ".del{color:##f87171;cursor:pointer}";
+        css = css & "a{color:##94a3b8;text-decoration:none;display:block;text-align:center;padding:16px}";
+
+        var h = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Todo List</title><style>' & css & '</style></head><body>';
+        h = h & '<h1>Todo List</h1>';
+        h = h & '<div class="frm"><input type="text" id="inp" placeholder="Add a todo..."><button class="btn" id="addBtn">Add</button></div>';
+        h = h & '<ul id="list"></ul>';
+        h = h & '<a href="/api/todos">API</a>';
+        h = h & '<script>';
+        h = h & 'function dodelete(id){fetch("/api/todos/"+id,{method:"DELETE"}).then(function(){load()})}';
+        h = h & 'function load(){fetch("/api/todos").then(function(r){return r.json()}).then(function(d){';
+        h = h & '  var el=document.getElementById("list");el.innerHTML="";';
+        h = h & '  if(!d.todos||d.todos.length===0){el.innerHTML="<li>No todos yet.</li>";return}';
+        h = h & '  for(var i=0;i<d.todos.length;i++){';
+        h = h & '    var t=d.todos[i];';
+        h = h & '    var li=document.createElement("li");';
+        h = h & '    if(t.completed){li.className="done"}';
+        h = h & '    var sp=document.createElement("span");sp.textContent=t.text;li.appendChild(sp);';
+        h = h & '    var btn=document.createElement("button");btn.textContent="X";btn.className="btn";';
+        h = h & '    btn.setAttribute("data-id",t.id);';
+        h = h & '    btn.onclick=function(){dodelete(this.getAttribute("data-id"))};';
+        h = h & '    li.appendChild(btn);';
+        h = h & '    el.appendChild(li);';
+        h = h & '  }})}';
+        h = h & 'document.getElementById("addBtn").onclick=function(){';
+        h = h & '  var i=document.getElementById("inp");if(!i.value)return;';
+        h = h & '  fetch("/api/todos",{method:"POST",body:i.value}).then(function(){i.value="";load()})';
+        h = h & '};load()';
+        h = h & '</script></body></html>';
+        return resp(200, "text/html; charset=utf-8", h);
+    }
+
+    function resp(required numeric code, required string contentType, required string body) {
+        return {"status": code, "headers": {"Content-Type": contentType}, "body": body};
+    }
+}

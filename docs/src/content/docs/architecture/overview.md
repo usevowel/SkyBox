@@ -4,12 +4,22 @@ description: How the BoxLang VM runs inside a Cloudflare Durable Object.
 ---
 
 ```
+                        ┌──────────────────────────┐
+                        │  Cloudflare Edge          │
+                        │  [assets]: dist/assets/   │
+                        │  ─── /css/style.css       │
+                        │  ─── /js/chat.js          │
+                        └──────────┬───────────────┘
+                                   │ fall through (no match)
+                                   ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Worker fetch()                                              │
-│  ─── validates Upgrade: websocket header                     │
-│  ─── routes to DO via idFromName("default")                  │
+│  ─── health check (/__health)                                │
+│  ─── static assets (/assets/*) → env.ASSETS.fetch(request)  │
+│  ─── WebSocket upgrade → DO via idFromName("default")        │
+│  ─── Web UI GET / → DO (for onHttpGet responses)            │
 └──────────────────────┬───────────────────────────────────────┘
-                       │ WebSocketPair
+                       │ WebSocketPair (or fetch to DO)
                        ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Durable Object: MatchBoxWebSocketDO                         │
@@ -18,6 +28,8 @@ description: How the BoxLang VM runs inside a Cloudflare Durable Object.
 │  │  BoxLang VM (single, shared across all connections)   │    │
 │  │  ┌────────────────────────────────────────────────┐   │    │
 │  │  │ Listener instance (your class)                  │   │    │
+│  │  │  • onConnect / onMessage / onClose (WebSocket)  │   │    │
+│  │  │  • onHttpGet(request) → {status,headers,body}   │   │    │
 │  │  │  variables.state = shared across ALL WS conns   │   │    │
 │  │  └────────────────────────────────────────────────┘   │    │
 │  │                                                       │    │
@@ -48,3 +60,22 @@ The DO uses `ctx.acceptWebSocket(server)` instead of `server.accept()`. This let
 
 ### Broadcast via getWebSockets()
 Broadcast iterates `ctx.getWebSockets()`, the native DO way to find all connected WebSockets.
+
+### Web UI via onHttpGet and Static Assets
+
+Since 2026-05-07, the BoxLang listener can serve HTML pages via an optional `onHttpGet` method:
+
+```boxlang
+function onHttpGet(required struct request) {
+    if (request.path == "/") {
+        return {
+            "status" : 200,
+            "headers" : { "Content-Type" : "text/html; charset=utf-8" },
+            "body" : renderChatPage()
+        };
+    }
+    // 404 for unknown paths
+}
+```
+
+CSS and JS should be served as external static assets via Cloudflare's `[assets]` feature rather than embedded as inline strings (which avoids `#` escaping and JS escaping issues). See the [chatroom demo](/demos/overview) for a full example.

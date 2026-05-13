@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — AiMessage pipeline not available on WASM. Build message arrays as JSON strings manually.
+	 */
+	function invoke(any message = null) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiMessage() is not available on MatchBox/WASM. Build message arrays manually using serializeJSON()."
+		);
+	}
+
+}

@@ -24,7 +24,7 @@
 component {
 
     // ── DI ──
-    property name="fileSystemUtil" inject="FileSystem";
+    property name="skyBoxService"  inject="SkyBoxService@skybox-cli";
     property name="print"          inject="PrintBuffer";
 
     // ── Available demo list ──
@@ -58,7 +58,7 @@ component {
 
         // Validate demo name
         if ( arguments.demo.len() && !isValidDemo( arguments.demo ) ) {
-            print.redLine( "Unknown demo: #arguments.demo#" );
+            print.redLine( "Unknown demo: " & arguments.demo );
             print.line();
             listDemos();
             return;
@@ -76,13 +76,13 @@ component {
         }
 
         print.boldGreenLine( "=== SkyBox Demo Scaffold ===" );
-        print.line( "  App:  #appName#" );
-        print.line( "  Demo: #demoName#" );
-        print.line( "  Dir:  #targetDir#" );
+        print.line( "  App:  " & appName );
+        print.line( "  Demo: " & demoName );
+        print.line( "  Dir:  " & targetDir );
         print.line();
 
         // Copy demo from the SkyBox examples directory
-        var projectRoot = detectProjectRoot();
+        var projectRoot = variables.skyBoxService.detectProjectRoot();
         if ( projectRoot.len() ) {
             var demoSrc = projectRoot & "/crates/matchbox-cf-worker/examples/" & demoName;
 
@@ -102,20 +102,20 @@ component {
                     }
                 );
 
-                print.greenLine( "Demo [#demoName#] scaffolded successfully!" );
+                print.greenLine( "Demo [" & demoName & "] scaffolded successfully!" );
                 print.line();
                 print.cyanLine( "Next steps:" );
-                print.greenLine( "  cd #targetDir#" );
+                print.greenLine( "  cd " & targetDir );
                 print.greenLine( "  npm install" );
-                print.greenLine( "  npm run build     ## Build the WASM worker" );
-                print.greenLine( "  npm run dev       ## Start local dev server" );
+                print.greenLine( "  npm run build" );
+                print.greenLine( "  npm run dev" );
                 print.line();
                 return;
             }
         }
 
         // Fallback: copy from module templates
-        var templatesPath = getTemplatesPath();
+        var templatesPath = variables.skyBoxService.getTemplatesPath();
         var demoTemplateDir = templatesPath & "/demos/" & demoName;
 
         if ( directoryExists( demoTemplateDir ) ) {
@@ -123,15 +123,14 @@ component {
                 directoryCreate( targetDir );
             }
             directoryCopy( demoTemplateDir, targetDir, true );
-            print.greenLine( "Demo [#demoName#] scaffolded from templates!" );
+            print.greenLine( "Demo [" & demoName & "] scaffolded from templates!" );
         } else {
             // Create a minimal demo from the init template
-            print.yellowLine( "Demo template [#demoName#] not available locally." );
+            print.yellowLine( "Demo template [" & demoName & "] not available locally." );
             print.yellowLine( "Scaffolding a basic project instead." );
             print.line();
 
-            var skyBoxService = wirebox.getInstance( "SkyBoxService@skybox-cli" );
-            skyBoxService.scaffoldProject(
+            variables.skyBoxService.scaffoldProject(
                 name      = appName,
                 directory = targetDir
             );
@@ -139,7 +138,7 @@ component {
 
         print.line();
         print.cyanLine( "Next steps:" );
-        print.greenLine( "  cd #targetDir#" );
+        print.greenLine( "  cd " & targetDir );
         print.greenLine( "  npm install" );
         print.greenLine( "  npm run build" );
         print.greenLine( "  npm run dev" );
@@ -178,33 +177,6 @@ component {
             }
         }
         return false;
-    }
-
-    /**
-     *  Detect SkyBox project root
-     */
-    private string function detectProjectRoot() {
-        var cwd = fileSystemUtil.resolvePath( getCWD() );
-        for ( var i = 1; i <= 10; i++ ) {
-            if ( fileExists( cwd & "/Cargo.toml" ) ) {
-                return cwd;
-            }
-            var parent = getDirectoryFromPath( cwd );
-            if ( parent == cwd ) { break; }
-            cwd = parent;
-        }
-        return "";
-    }
-
-    /**
-     *  Get the templates directory path
-     */
-    private string function getTemplatesPath() {
-        // In a CommandBox module, modulePath is injected
-        if ( !isNull( variables.modulePath ) && variables.modulePath.len() ) {
-            return variables.modulePath & "/templates";
-        }
-        return expandPath( "../templates" );
     }
 
 }

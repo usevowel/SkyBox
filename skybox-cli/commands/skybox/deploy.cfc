@@ -33,10 +33,10 @@ component {
     ) {
         print.boldGreenLine( "=== SkyBox Deploy ===" );
         if ( arguments.env.len() ) {
-            print.line( "  Environment: #arguments.env#" );
+            print.line( "  Environment: " & arguments.env );
         }
         if ( arguments.dryRun ) {
-            print.yellowLine( "  DRY RUN — no deployment will be made" );
+            print.yellowLine( "  DRY RUN - no deployment will be made" );
         }
         print.line();
 
@@ -50,7 +50,7 @@ component {
                 print.line( buildOutput );
                 print.line();
             } catch ( any e ) {
-                print.redLine( "Build failed: #e.message#" );
+                print.redLine( "Build failed: " & e.message );
                 if ( !confirm( "Continue to deploy anyway? (y/n) " ) ) {
                     print.redLine( "Deploy aborted." );
                     return;
@@ -85,7 +85,7 @@ component {
 
         if ( arguments.dryRun ) {
             print.greenLine( "DRY RUN: Would execute:" );
-            print.line( "  #wranglerCmd# #wranglerArgs.toList( " " )#" );
+            print.line( "  " & wranglerCmd & " " & wranglerArgs.toList( " " ) );
             print.line();
             print.greenLine( "Run without --dry-run to deploy." );
             return;
@@ -95,12 +95,12 @@ component {
         print.line();
 
         try {
-            command( "!#wranglerCmd#" )
+            command( "!" & wranglerCmd )
                 .params( wranglerArgs )
                 .run();
             print.greenLine( "Deploy complete!" );
         } catch ( any e ) {
-            print.redLine( "Deploy failed: #e.message#" );
+            print.redLine( "Deploy failed: " & e.message );
             if ( e.detail.len() ) {
                 print.redLine( e.detail );
             }

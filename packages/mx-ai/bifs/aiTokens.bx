@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — token counting not available on WASM.
+	 */
+	function invoke(required any text, struct options = {}) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiTokens() is not available on MatchBox/WASM."
+		);
+	}
+
+}

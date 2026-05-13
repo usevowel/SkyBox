@@ -53,10 +53,13 @@ crates/matchbox-cf-worker/
 │   ├── mcf-worker.js           # Cloudflare Worker + DO entry point
 │   └── wrangler.toml           # Template wrangler config
 ├── examples/
-│   ├── build.sh                # Build pipeline script
+│   ├── build.sh                # Build pipeline script (single-file)
 │   ├── echo/                   # Basic echo server
 │   ├── counter/                # Stateful counter
-│   ├── chatroom/               # Multi-client chat
+│   ├── chatroom/               # Multi-client chat (multi-file + assets)
+│   │   ├── assets/             # Static CSS/JS files
+│   │   ├── build-multi.sh      # Multi-file build script
+│   │   └── src/                # Multi-file BoxLang sources
 │   ├── moonphase/              # Moon phase calculator
 │   ├── romannumeral/           # Roman numeral converter
 │   ├── jsonfmt/                # JSON structural validator

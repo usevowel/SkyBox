@@ -1,0 +1,103 @@
+class JsonFormatterListener {
+    function onConnect(required channel) {
+        channel.sendJson({"type":"welcome","service":"JSON Tool","instructions":'Commands: "validate JSON_TEXT", "count JSON_TEXT", or "help"'});
+    }
+
+    function onMessage(required message, required channel) {
+        var parts = listToArray(message, " ");
+        var cmd = lcase(trim(parts[1] ?: ""));
+
+        if (cmd == "help" || cmd == "") {
+            channel.sendJson({"type":"help","commands":[
+                {"cmd":"validate JSON","desc":"Check if text is valid JSON"},
+                {"cmd":"count JSON","desc":"Count elements in JSON data"},
+                {"cmd":"help","desc":"Show this help"}]});
+            return;
+        }
+
+        var jsonStr = "";
+        for (var i = 2; i <= arrayLen(parts); i = i + 1) {
+            if (i > 2) jsonStr = jsonStr & " ";
+            jsonStr = jsonStr & parts[i];
+        }
+
+        if (cmd == "validate") {
+            var result = isValidJson(jsonStr);
+            channel.sendJson({"type":"result","action":"validate","valid":result.valid,"jsonType":result.typeName});
+            return;
+        }
+
+        if (cmd == "count") {
+            var result = isValidJson(jsonStr);
+            if (!result.valid) {
+                channel.sendJson({"type":"error","message":"Invalid JSON"});
+            } else {
+                var counts = {"objects":0,"arrays":0,"strings":0,"numbers":0,"booleans":0,"nulls":0};
+                var parsed = result.parsed;
+                if (isStruct(parsed)) { countRecursive(parsed, counts); }
+                else if (isArray(parsed)) { countRecursive(parsed, counts); }
+                channel.sendJson({"type":"result","action":"count","counts":counts});
+            }
+            return;
+        }
+
+        channel.sendJson({"type":"error","message":"Unknown command"});
+    }
+
+    function onClose(required channel) {}
+
+    function countRecursive(required value, required counts) {
+        if (isStruct(value)) {
+            counts.objects = counts.objects + 1;
+            for (var key in value) { countRecursive(value[key], counts); }
+        } else if (isArray(value)) {
+            counts.arrays = counts.arrays + 1;
+            for (var i = 1; i <= arrayLen(value); i = i + 1) { countRecursive(value[i], counts); }
+        } else if (isBoolean(value)) { counts.booleans = counts.booleans + 1;
+        } else if (isNumeric(value)) { counts.numbers = counts.numbers + 1;
+        } else if (isNull(value)) { counts.nulls = counts.nulls + 1;
+        } else { counts.strings = counts.strings + 1; }
+    }
+
+    function isValidJson(required str) {
+        var t = trim(str);
+        var lenT = len(t);
+        if (lenT == 0) return {"valid":false,"typeName":"empty","parsed":null};
+
+        // Check balanced braces/brackets
+        var braceCount = 0;
+        var bracketCount = 0;
+        var inString = false;
+        var escapeNext = false;
+        var firstNonSpace = "";
+        var lastNonSpace = "";
+
+        for (var i = 1; i <= lenT; i = i + 1) {
+            var c = mid(t, i, 1);
+
+            if (escapeNext) { escapeNext = false; continue; }
+            if (c == "\\" && inString) { escapeNext = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+
+            if (c == "{") braceCount = braceCount + 1;
+            else if (c == "}") braceCount = braceCount - 1;
+            else if (c == "[") bracketCount = bracketCount + 1;
+            else if (c == "]") bracketCount = bracketCount - 1;
+
+            if (firstNonSpace == "" && c != " ") firstNonSpace = c;
+            if (c != " ") lastNonSpace = c;
+        }
+
+        if (inString) return {"valid":false,"typeName":"unclosed_string","parsed":null};
+        if (braceCount != 0) return {"valid":false,"typeName":"unbalanced_braces","parsed":null};
+        if (bracketCount != 0) return {"valid":false,"typeName":"unbalanced_brackets","parsed":null};
+        if (firstNonSpace != "{" && firstNonSpace != "[") return {"valid":false,"typeName":"not_object_or_array","parsed":null};
+
+        // For the count command, we reconstruct a minimal parseable JSON
+        // using structNew/arrayNew since deserializeJSON is unavailable
+        if (firstNonSpace == "{") return {"valid":true,"typeName":"object","parsed":structNew()};
+        if (firstNonSpace == "[") return {"valid":true,"typeName":"array","parsed":[]};
+        return {"valid":true,"typeName":"unknown","parsed":null};
+    }
+}

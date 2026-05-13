@@ -71,7 +71,7 @@ fn req(path: &str) -> RequestData {
         query: HashMap::new(),
         cookies: HashMap::new(),
         headers,
-        body: Vec::new(),
+        body: String::new(),
         full_url: format!("http://example.com{}", path),
     }
 }

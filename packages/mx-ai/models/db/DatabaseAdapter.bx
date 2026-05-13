@@ -1,0 +1,9 @@
+interface {
+
+	array function query( required string sql, array params = [] );
+
+	numeric function execute( required string sql, array params = [] );
+
+	array function batch( required array statements );
+
+}

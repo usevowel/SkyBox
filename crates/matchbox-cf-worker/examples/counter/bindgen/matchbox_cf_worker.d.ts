@@ -36,6 +36,14 @@ export function vm_on_close(connection_id: string): void;
 export function vm_on_connect(connection_id: string, request_json: string): void;
 
 /**
+ * Handle an HTTP request by calling the BoxLang listener's `onHttpGet` method.
+ *
+ * `request_json`: JSON-serialized `RequestData` containing method, path, headers, etc.
+ * Returns: A JSON string with `{status, headers, body}` as returned by the listener.
+ */
+export function vm_on_http_request(request_json: string): string;
+
+/**
  * Handle a WebSocket message: call `listener.onMessage(message, channel)`.
  *
  * `msg_type`: 0 = text, 1 = binary
@@ -63,6 +71,7 @@ export interface InitOutput {
     readonly vm_init: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly vm_on_close: (a: number, b: number, c: number) => void;
     readonly vm_on_connect: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly vm_on_http_request: (a: number, b: number, c: number) => void;
     readonly vm_on_message: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly vm_register_connection: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly vm_set_state: (a: number, b: number, c: number) => void;
@@ -71,15 +80,15 @@ export interface InitOutput {
     readonly _matchbox_invoke_callback: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly _matchbox_pump_vm: (a: number, b: number) => void;
     readonly _matchbox_set_instance_prop: (a: number, b: number, c: number, d: number, e: number) => void;
-    readonly __wasm_bindgen_func_elem_1530: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_410: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_826: (a: number, b: number, c: number, d: number, e: number) => number;
-    readonly __wasm_bindgen_func_elem_823: (a: number, b: number, c: number, d: number) => number;
-    readonly __wasm_bindgen_func_elem_824: (a: number, b: number, c: number, d: number) => number;
-    readonly __wasm_bindgen_func_elem_1956: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1970: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_822: (a: number, b: number, c: number) => number;
-    readonly __wasm_bindgen_func_elem_825: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_422: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_1542: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_838: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly __wasm_bindgen_func_elem_835: (a: number, b: number, c: number, d: number) => number;
+    readonly __wasm_bindgen_func_elem_836: (a: number, b: number, c: number, d: number) => number;
+    readonly __wasm_bindgen_func_elem_1968: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1982: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_834: (a: number, b: number, c: number) => number;
+    readonly __wasm_bindgen_func_elem_837: (a: number, b: number, c: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

@@ -1,0 +1,111 @@
+class TextAnalyzerListener {
+    function onConnect(required channel) {
+        channel.sendJson({"type":"welcome","service":"Text Analyzer","instructions":'Send "analyze YOUR TEXT HERE", "words YOUR TEXT HERE", or "help"'});
+    }
+
+    function onMessage(required message, required channel) {
+        var parts = listToArray(message, " ");
+        var cmd = lcase(trim(parts[1] ?: ""));
+
+        if (cmd == "help" || cmd == "") {
+            channel.sendJson({"type":"help","commands":[
+                {"cmd":"analyze TEXT","desc":"Full analysis: words, chars, sentences, reading time"},
+                {"cmd":"words TEXT","desc":"Show word frequency (top 20 words)"},
+                {"cmd":"help","desc":"Show this help"}]});
+            return;
+        }
+
+        // Extract the text (everything after the command word)
+        var text = "";
+        for (var i = 2; i <= arrayLen(parts); i = i + 1) {
+            if (i > 2) text = text & " ";
+            text = text & parts[i];
+        }
+
+        if (len(trim(text)) == 0) {
+            channel.sendJson({"type":"error","message":"Provide text to analyze"}); return;
+        }
+
+        if (cmd == "analyze") {
+            var charCount = len(text);
+            var charNoSpace = countNonSpace(text);
+            var wordCount = countWords(text);
+            var sentenceCount = countSentences(text);
+            var readingTimeMin = ceiling(wordCount / 200);
+            channel.sendJson({"type":"result","action":"analyze","analysis":{
+                "characterCount":charCount,"characterCountNoSpace":charNoSpace,
+                "wordCount":wordCount,"sentenceCount":sentenceCount,
+                "estimatedReadingTimeMinutes":readingTimeMin
+            }});
+            return;
+        }
+
+        if (cmd == "words") {
+            var freq = wordFrequency(text);
+            var top = [];
+            var maxItems = min(20, arrayLen(freq));
+            for (var i = 1; i <= maxItems; i = i + 1) { arrayAppend(top, freq[i]); }
+            channel.sendJson({"type":"result","action":"words","totalUnique":arrayLen(freq),"frequencies":top});
+            return;
+        }
+
+        channel.sendJson({"type":"error","message":"Unknown command. Send 'help'"});
+    }
+
+    function onClose(required channel) {}
+
+    function countWords(required text) {
+        var words = listToArray(text, " ");
+        var count = 0;
+        for (var i = 1; i <= arrayLen(words); i = i + 1) { if (len(trim(words[i])) > 0) count = count + 1; }
+        return count;
+    }
+
+    function countSentences(required text) {
+        var count = 0;
+        for (var i = 1; i <= len(text); i = i + 1) {
+            var c = mid(text, i, 1);
+            if (c == "." || c == "!" || c == "?") count = count + 1;
+        }
+        return max(count, 1);
+    }
+
+    function wordFrequency(required text) {
+        var freq = {};
+        var words = listToArray(text, " ");
+        for (var i = 1; i <= arrayLen(words); i = i + 1) {
+            var w = trim(words[i]);
+            w = lcase(w);
+            w = keepAlphanumeric(w);
+            if (len(w) < 2) continue;
+            if (isNull(freq[w])) { freq[w] = 1; } else { freq[w] = freq[w] + 1; }
+        }
+        var result = [];
+        for (var word in freq) { arrayAppend(result, {"word":word,"count":freq[word]}); }
+        for (var i = 1; i <= arrayLen(result); i = i + 1) {
+            for (var j = i + 1; j <= arrayLen(result); j = j + 1) {
+                if (result[j].count > result[i].count) { var tmp = result[i]; result[i] = result[j]; result[j] = tmp; }
+            }
+        }
+        return result;
+    }
+
+    function countNonSpace(required str) {
+        var count = 0;
+        for (var i = 1; i <= len(str); i = i + 1) {
+            if (mid(str, i, 1) != " ") count = count + 1;
+        }
+        return count;
+    }
+
+    function keepAlphanumeric(required str) {
+        var out = "";
+        for (var i = 1; i <= len(str); i = i + 1) {
+            var c = mid(str, i, 1);
+            if ((c >= "0" && c <= "9") || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")) {
+                out = out & c;
+            }
+        }
+        return out;
+    }
+}

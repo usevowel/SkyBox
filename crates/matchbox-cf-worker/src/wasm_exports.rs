@@ -105,8 +105,11 @@ pub fn vm_register_connection(connection_id: &str, request_json: &str) -> Result
 }
 
 /// Handle a new WebSocket connection: call `listener.onConnect(channel)`.
+///
+/// Returns a JSON string, either `"{}"` or `{"__paused__": true, "ops": [...]}`
+/// if the VM yielded for async operations (D1 queries, etc.).
 #[wasm_bindgen]
-pub fn vm_on_connect(connection_id: &str, request_json: &str) -> Result<(), JsValue> {
+pub fn vm_on_connect(connection_id: &str, request_json: &str) -> Result<String, JsValue> {
     let request: RequestData = serde_json::from_str(request_json)
         .map_err(|e| JsValue::from_str(&format!("Invalid RequestData: {}", e)))?;
 
@@ -124,8 +127,10 @@ pub fn vm_on_connect(connection_id: &str, request_json: &str) -> Result<(), JsVa
 /// Handle a WebSocket message: call `listener.onMessage(message, channel)`.
 ///
 /// `msg_type`: 0 = text, 1 = binary
+/// Returns a JSON string, either `"{}"` or `{"__paused__": true, "ops": [...]}`
+/// if the VM yielded for async operations.
 #[wasm_bindgen]
-pub fn vm_on_message(connection_id: &str, msg_type: u8, message: &[u8]) -> Result<(), JsValue> {
+pub fn vm_on_message(connection_id: &str, msg_type: u8, message: &[u8]) -> Result<String, JsValue> {
     DO_STATE.with(|s| {
         let mut state = s.borrow_mut();
         let state = state.as_mut().ok_or_else(|| {
@@ -164,6 +169,43 @@ pub fn vm_get_state() -> Result<String, JsValue> {
             .get_state()
             .map_err(|e| JsValue::from_str(&e))?;
         serde_json::to_string(&json).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// Handle an HTTP request by calling the BoxLang listener's `onHttpGet` method.
+///
+/// `request_json`: JSON-serialized `RequestData` containing method, path, headers, etc.
+/// Returns: A JSON string with `{status, headers, body}` as returned by the listener.
+#[wasm_bindgen]
+pub fn vm_on_http_request(request_json: &str) -> Result<String, JsValue> {
+    let request: RequestData = serde_json::from_str(request_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid RequestData: {}", e)))?;
+
+    DO_STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        let state = state.as_mut().ok_or_else(|| {
+            JsValue::from_str("DO_STATE not initialized. Call vm_init first.")
+        })?;
+        state
+            .on_http_request(request)
+            .map_err(|e| JsValue::from_str(&e))
+    })
+}
+
+/// Complete pending async operations and resume the VM.
+///
+/// `results_json`: JSON array of `[{async_id, data}]` with the results of
+/// each async operation. Called by the JS shell after D1 queries resolve.
+#[wasm_bindgen]
+pub fn vm_complete_async(results_json: &str) -> Result<String, JsValue> {
+    DO_STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        let state = state.as_mut().ok_or_else(|| {
+            JsValue::from_str("DO_STATE not initialized. Call vm_init first.")
+        })?;
+        state
+            .complete_async(results_json)
+            .map_err(|e| JsValue::from_str(&e))
     })
 }
 

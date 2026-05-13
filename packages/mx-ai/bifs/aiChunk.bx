@@ -1,0 +1,17 @@
+@BoxBIF
+class {
+
+	function invoke(
+		required string text,
+		numeric chunkSize = 500,
+		numeric overlap = 50,
+		string strategy = "recursive"
+	) {
+		return TextChunker.chunk( arguments.text, {
+			chunkSize: arguments.chunkSize,
+			overlap: arguments.overlap,
+			strategy: arguments.strategy
+		} );
+	}
+
+}

@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — global skills not available on WASM.
+	 */
+	function invoke() {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiGlobalSkills() is not available on MatchBox/WASM."
+		);
+	}
+
+}

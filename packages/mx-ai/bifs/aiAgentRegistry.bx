@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — agent registry not available on WASM.
+	 */
+	function invoke() {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiAgentRegistry() is not available on MatchBox/WASM."
+		);
+	}
+
+}

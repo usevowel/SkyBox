@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Collaborative Todo List</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; }
+header { background: linear-gradient(135deg, #1e293b, #334155); padding: 1.5rem; text-align: center; border-bottom: 1px solid #475569; }
+header h1 { font-size: 1.5rem; background: linear-gradient(90deg, #f97316, #ef4444); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+header p { color: #94a3b8; font-size: 0.875rem; margin-top: 0.25rem; }
+.status { text-align: center; padding: 0.5rem; font-size: 0.8rem; }
+.status.connected { color: #4ade80; }
+.status.disconnected { color: #f87171; }
+.container { flex: 1; max-width: 700px; margin: 0 auto; padding: 1rem; width: 100%; display: flex; flex-direction: column; }
+.add-area { display: flex; gap: 0.5rem; padding: 1rem 0; }
+.add-area input { flex: 1; padding: 0.75rem; border: 1px solid #475569; border-radius: 0.5rem; background: #1e293b; color: #e2e8f0; font-size: 0.9rem; }
+.add-area input:focus { outline: none; border-color: #f97316; }
+.add-area button { padding: 0.75rem 1.5rem; border: none; border-radius: 0.5rem; background: #f97316; color: white; cursor: pointer; font-weight: 600; }
+.add-area button:hover { background: #ea580c; }
+.stats-bar { display: flex; gap: 1rem; justify-content: center; padding: 0.5rem; font-size: 0.85rem; color: #94a3b8; }
+.stats-bar .stat { display: flex; align-items: center; gap: 0.25rem; }
+.stats-bar .num { font-weight: 700; color: #e2e8f0; }
+.todo-list { flex: 1; overflow-y: auto; }
+.todo-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid #1e293b; transition: background 0.15s; }
+.todo-item:hover { background: #1e293b; }
+.todo-item.completed { opacity: 0.6; }
+.todo-item.completed .todo-text { text-decoration: line-through; color: #64748b; }
+.todo-checkbox { width: 1.25rem; height: 1.25rem; border: 2px solid #475569; border-radius: 0.25rem; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+.todo-checkbox.checked { background: #22c55e; border-color: #22c55e; }
+.todo-checkbox.checked::after { content: "✓"; color: white; font-size: 0.75rem; font-weight: 700; }
+.todo-text { flex: 1; font-size: 0.9rem; }
+.todo-meta { font-size: 0.75rem; color: #64748b; }
+.todo-delete { padding: 0.25rem 0.5rem; border: 1px solid #475569; border-radius: 0.25rem; background: transparent; color: #f87171; cursor: pointer; font-size: 0.8rem; opacity: 0; transition: all 0.15s; }
+.todo-item:hover .todo-delete { opacity: 1; }
+.todo-delete:hover { background: #7f1d1d; border-color: #f87171; }
+.empty-state { text-align: center; padding: 3rem; color: #64748b; }
+.empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+.actions { display: flex; gap: 0.5rem; padding: 0.75rem 0; justify-content: center; }
+.actions button { padding: 0.4rem 0.8rem; border: 1px solid #475569; border-radius: 0.25rem; background: #1e293b; color: #94a3b8; cursor: pointer; font-size: 0.8rem; }
+.actions button:hover { background: #334155; color: #e2e8f0; }
+.actions .danger:hover { background: #7f1d1d; border-color: #f87171; color: #f87171; }
+</style>
+</head>
+<body>
+<header>
+  <h1>☑ Collaborative Todo List</h1>
+  <p>Real-time todo list — shared across all connected clients</p>
+</header>
+<div class="status disconnected" id="status">Disconnected</div>
+<div class="container">
+  <div class="stats-bar" id="statsBar">
+    <span class="stat">👥 <span class="num" id="clientCount">0</span> clients</span>
+    <span class="stat">📋 <span class="num" id="totalCount">0</span> total</span>
+    <span class="stat">✅ <span class="num" id="completedCount">0</span> done</span>
+  </div>
+  <div class="add-area">
+    <input type="text" id="todoInput" placeholder="Add a new todo..." onkeydown="if(event.key==='Enter') addTodo()" />
+    <button onclick="addTodo()">Add</button>
+  </div>
+  <div class="todo-list" id="todoList">
+    <div class="empty-state">
+      <div class="icon">📝</div>
+      <p>No todos yet. Add one above!</p>
+    </div>
+  </div>
+  <div class="actions">
+    <button onclick="sendAction('list')">🔄 Refresh</button>
+    <button onclick="sendAction('clear')">🗑 Clear Done</button>
+    <button class="danger" onclick="if(confirm('Clear ALL todos?'))sendAction('clearAll')">⚠ Clear All</button>
+  </div>
+</div>
+<script>
+const ws = new WebSocket('ws://' + location.host + '/ws');
+let todos = [];
+const todoList = document.getElementById('todoList');
+const status = document.getElementById('status');
+
+ws.onopen = () => { status.textContent = 'Connected'; status.className = 'status connected'; };
+ws.onclose = () => { status.textContent = 'Disconnected'; status.className = 'status disconnected'; };
+ws.onmessage = (event) => { handleMessage(JSON.parse(event.data)); };
+
+function handleMessage(data) {
+  if (data.type === 'state' || data.type === 'result' && data.action === 'list') {
+    todos = data.todos || [];
+    renderTodos();
+    updateStats(data);
+  } else if (data.type === 'added') {
+    todos.push(data.todo);
+    renderTodos();
+    updateStats(data);
+    toast('➕ Added: ' + data.todo.text);
+  } else if (data.type === 'updated') {
+    for (let i = 0; i < todos.length; i++) {
+      if (todos[i].id === data.todo.id) { todos[i] = data.todo; break; }
+    }
+    renderTodos();
+  } else if (data.type === 'deleted') {
+    todos = todos.filter(t => t.id !== data.id);
+    renderTodos();
+    updateStats(data);
+    toast('🗑 Deleted: ' + data.text);
+  } else if (data.type === 'cleared' || data.type === 'clearedAll') {
+    if (data.type === 'clearedAll') todos = [];
+    else todos = todos.filter(t => !t.completed);
+    renderTodos();
+    if (data.total !== undefined) document.getElementById('totalCount').textContent = data.total;
+    toast(data.type === 'clearedAll' ? '⚠ All todos cleared' : '🗑 Completed todos cleared');
+  } else if (data.type === 'clientJoined') {
+    document.getElementById('clientCount').textContent = data.connectedClients;
+    toast('👋 New client connected (' + data.connectedClients + ' total)');
+  } else if (data.type === 'clientLeft') {
+    document.getElementById('clientCount').textContent = data.connectedClients;
+  } else if (data.type === 'welcome') {
+    // Initial state is handled as 'state' type from onConnect
+  } else if (data.type === 'error') {
+    toast('⚠️ ' + data.message);
+  } else if (data.type === 'help') {
+    // ignored for UI
+  }
+}
+
+function renderTodos() {
+  if (todos.length === 0) {
+    todoList.innerHTML = '<div class="empty-state"><div class="icon">📝</div><p>No todos yet. Add one above!</p></div>';
+    return;
+  }
+  let html = '';
+  todos.forEach(t => {
+    html += '<div class="todo-item' + (t.completed ? ' completed' : '') + '" data-id="' + t.id + '">' +
+      '<div class="todo-checkbox' + (t.completed ? ' checked' : '') + '" onclick="toggleTodo(' + t.id + ')"></div>' +
+      '<div><div class="todo-text">' + escapeHtml(t.text) + '</div>' +
+      '<div class="todo-meta">#' + t.id + (t.createdBy ? ' by ' + t.createdBy.slice(0,8) : '') + '</div></div>' +
+      '<button class="todo-delete" onclick="deleteTodo(' + t.id + ')">✕</button></div>';
+  });
+  todoList.innerHTML = html;
+}
+
+function updateStats(data) {
+  if (data.connectedClients !== undefined) document.getElementById('clientCount').textContent = data.connectedClients;
+  if (data.total !== undefined) document.getElementById('totalCount').textContent = data.total;
+  else document.getElementById('totalCount').textContent = todos.length;
+  document.getElementById('completedCount').textContent = todos.filter(t => t.completed).length;
+}
+
+function addTodo() {
+  const input = document.getElementById('todoInput');
+  const text = input.value.trim();
+  if (!text) return;
+  ws.send(JSON.stringify({ action: 'add', text: text }));
+  input.value = '';
+}
+
+function toggleTodo(id) {
+  const todo = todos.find(t => t.id === id);
+  if (!todo) return;
+  ws.send(JSON.stringify({ action: todo.completed ? 'uncomplete' : 'complete', id: id }));
+}
+
+function deleteTodo(id) {
+  ws.send(JSON.stringify({ action: 'delete', id: id }));
+}
+
+function sendAction(action) {
+  ws.send(JSON.stringify({ action: action }));
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+function toast(msg) {
+  // Simple toast via status bar flash
+  const old = status.textContent;
+  status.textContent = '🔔 ' + msg;
+  setTimeout(() => { if (status.textContent === '🔔 ' + msg) status.textContent = old; }, 2000);
+}
+</script>
+</body>
+</html>

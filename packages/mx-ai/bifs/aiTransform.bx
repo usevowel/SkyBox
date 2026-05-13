@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — transform runnables not available on WASM.
+	 */
+	function invoke(required any transformer, struct config = {}) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiTransform() is not available on MatchBox/WASM."
+		);
+	}
+
+}

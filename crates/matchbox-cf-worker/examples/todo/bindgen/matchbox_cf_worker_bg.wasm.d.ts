@@ -1,10 +1,12 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const vm_complete_async: (a: number, b: number, c: number) => void;
 export const vm_get_state: (a: number) => void;
 export const vm_init: (a: number, b: number, c: number, d: number, e: number) => void;
 export const vm_on_close: (a: number, b: number, c: number) => void;
 export const vm_on_connect: (a: number, b: number, c: number, d: number, e: number) => void;
+export const vm_on_http_request: (a: number, b: number, c: number) => void;
 export const vm_on_message: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
 export const vm_register_connection: (a: number, b: number, c: number, d: number, e: number) => void;
 export const vm_set_state: (a: number, b: number, c: number) => void;
@@ -13,15 +15,15 @@ export const _matchbox_get_instance_prop: (a: number, b: number, c: number, d: n
 export const _matchbox_invoke_callback: (a: number, b: number, c: number, d: number, e: number) => void;
 export const _matchbox_pump_vm: (a: number, b: number) => void;
 export const _matchbox_set_instance_prop: (a: number, b: number, c: number, d: number, e: number) => void;
-export const __wasm_bindgen_func_elem_1530: (a: number, b: number) => void;
-export const __wasm_bindgen_func_elem_410: (a: number, b: number) => void;
-export const __wasm_bindgen_func_elem_826: (a: number, b: number, c: number, d: number, e: number) => number;
-export const __wasm_bindgen_func_elem_823: (a: number, b: number, c: number, d: number) => number;
-export const __wasm_bindgen_func_elem_824: (a: number, b: number, c: number, d: number) => number;
-export const __wasm_bindgen_func_elem_1956: (a: number, b: number, c: number, d: number) => void;
-export const __wasm_bindgen_func_elem_1970: (a: number, b: number, c: number, d: number) => void;
-export const __wasm_bindgen_func_elem_822: (a: number, b: number, c: number) => number;
-export const __wasm_bindgen_func_elem_825: (a: number, b: number, c: number) => void;
+export const __wasm_bindgen_func_elem_521: (a: number, b: number) => void;
+export const __wasm_bindgen_func_elem_3886: (a: number, b: number) => void;
+export const __wasm_bindgen_func_elem_935: (a: number, b: number, c: number, d: number, e: number) => number;
+export const __wasm_bindgen_func_elem_932: (a: number, b: number, c: number, d: number) => number;
+export const __wasm_bindgen_func_elem_933: (a: number, b: number, c: number, d: number) => number;
+export const __wasm_bindgen_func_elem_4452: (a: number, b: number, c: number, d: number) => void;
+export const __wasm_bindgen_func_elem_4466: (a: number, b: number, c: number, d: number) => void;
+export const __wasm_bindgen_func_elem_931: (a: number, b: number, c: number) => number;
+export const __wasm_bindgen_func_elem_934: (a: number, b: number, c: number) => void;
 export const __wbindgen_export: (a: number, b: number) => number;
 export const __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
 export const __wbindgen_export3: (a: number) => void;

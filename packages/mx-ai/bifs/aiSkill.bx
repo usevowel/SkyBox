@@ -1,0 +1,19 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — skills not available on WASM.
+	 */
+	function invoke(
+		required string path,
+		string description = "",
+		string content = "",
+		boolean recurse = false
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiSkill() is not available on MatchBox/WASM."
+		);
+	}
+
+}

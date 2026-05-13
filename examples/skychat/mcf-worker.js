@@ -565,6 +565,9 @@ export class MatchBoxWebSocketDO {
             case 'turso_query':   return this.handleTursoQuery(msg);
             case 'turso_execute': return this.handleTursoExecute(msg);
             case 'openrouter':    return JSON.stringify(this.handleOpenRouter(msg, binding));
+            case 'vectorize_upsert': return this.handleVectorizeUpsert(msg, binding);
+            case 'vectorize_query':  return this.handleVectorizeQuery(msg, binding);
+            case 'vectorize_delete_by_ids': return this.handleVectorizeDeleteByIds(msg, binding);
             default:
                 return JSON.stringify({ success: false, error: `Unknown action: ${msg.action}` });
         }
@@ -659,6 +662,69 @@ export class MatchBoxWebSocketDO {
             throw new Error(`Turso error: ${response.status} ${await response.text()}`);
         }
         return response.json();
+    }
+
+    // ── Vectorize Handlers ────────────────────────────────────────
+
+    async handleVectorizeUpsert(msg, binding) {
+        const async_id = msg.async_id;
+        if (!binding) {
+            return JSON.stringify({ success: false, error: 'Vectorize binding not configured', async_id });
+        }
+        try {
+            const vectors = JSON.parse(msg.args.vectors);
+            const result = await binding.upsert(vectors);
+            const count = result?.count ?? vectors.length;
+            this.pendingAsyncOps.set(async_id, Promise.resolve(count));
+        } catch (err) {
+            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+        }
+        return JSON.stringify({ success: true, async_id });
+    }
+
+    async handleVectorizeQuery(msg, binding) {
+        const async_id = msg.async_id;
+        if (!binding) {
+            return JSON.stringify({ success: false, error: 'Vectorize binding not configured', async_id });
+        }
+        try {
+            const vector = JSON.parse(msg.args.vector);
+            const topK = parseInt(msg.args.topK || '5', 10);
+            const filter = msg.args.filter ? JSON.parse(msg.args.filter) : undefined;
+
+            const queryOptions = { topK, returnValues: true, returnMetadata: true };
+            if (filter && Object.keys(filter).length > 0) {
+                queryOptions.filter = filter;
+            }
+
+            const result = await binding.query(vector, queryOptions);
+            // Convert Vectorize distance (0=identical, 2=opposite) to BXAI score (0-1, higher=better)
+            const matches = (result.matches || []).map(m => ({
+                id: m.id,
+                score: 1 - (m.score / 2),
+                metadata: m.metadata || {},
+                values: m.values || [],
+            }));
+            this.pendingAsyncOps.set(async_id, Promise.resolve({ count: result.count || matches.length, matches }));
+        } catch (err) {
+            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+        }
+        return JSON.stringify({ success: true, async_id });
+    }
+
+    async handleVectorizeDeleteByIds(msg, binding) {
+        const async_id = msg.async_id;
+        if (!binding) {
+            return JSON.stringify({ success: false, error: 'Vectorize binding not configured', async_id });
+        }
+        try {
+            const ids = JSON.parse(msg.args.ids);
+            const result = await binding.deleteByIds(ids);
+            this.pendingAsyncOps.set(async_id, Promise.resolve(result));
+        } catch (err) {
+            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
+        }
+        return JSON.stringify({ success: true, async_id });
     }
 
     // ── OpenRouter Streaming Handler ──────────────────────────────

@@ -1,0 +1,170 @@
+class extends="BaseVectorMemory" {
+
+	function init(
+		required any adapter,
+		string key = createUUID(),
+		string userId = "",
+		string conversationId = "",
+		string collection = "ai_memory"
+	) {
+		super.init( argumentCollection: arguments );
+		variables.vectors = [];
+		variables.metadata = [];
+		variables.ids = [];
+		variables.dimension = 0;
+		variables.configured = false;
+		return this;
+	}
+
+	IVectorMemory function ensureCollection() {
+		return this;
+	}
+
+	IVectorMemory function storeDocument(
+		required string id,
+		required string text,
+		required array embedding,
+		required struct metadata
+	) {
+		if ( !variables.configured ) {
+			variables.configured = true;
+		}
+		if ( variables.dimension == 0 ) {
+			variables.dimension = arguments.embedding.len();
+		} else if ( arguments.embedding.len() != variables.dimension ) {
+			throw(
+				type: "VectorDimensionMismatch",
+				message: "All vectors must have the same dimensions",
+				detail: "Expected #variables.dimension#, got #arguments.embedding.len()#"
+			);
+		}
+		var fullMetadata = arguments.metadata.duplicate();
+		fullMetadata.text = arguments.text;
+		variables.vectors.append( arguments.embedding );
+		variables.metadata.append( fullMetadata );
+		variables.ids.append( arguments.id );
+		return this;
+	}
+
+	array function searchByVector(
+		required array embedding,
+		required numeric limit,
+		required struct filter
+	) {
+		var results = [];
+		for ( var i = 1; i <= variables.vectors.len(); i++ ) {
+			var similarity = cosineSimilarity( arguments.embedding, variables.vectors[ i ] );
+			results.append( {
+				id: variables.ids[ i ],
+				score: similarity,
+				text: variables.metadata[ i ].text ?: "",
+				metadata: variables.metadata[ i ]
+			} );
+		}
+		results.sort( function( a, b ) {
+			return b.score - a.score;
+		} );
+
+		var filterCriteria = arguments.filter;
+		if ( !filterCriteria.isEmpty() ) {
+			results = results.filter( ( result ) => {
+				for ( var key in filterCriteria ) {
+					if ( !result.metadata.keyExists( key ) || result.metadata[ key ] != filterCriteria[ key ] ) {
+						return false;
+					}
+				}
+				return true;
+			} );
+		}
+
+		if ( results.len() > arguments.limit ) {
+			return results.slice( 1, arguments.limit );
+		}
+		return results;
+	}
+
+	array function getAllDocuments() {
+		var docs = [];
+		for ( var i = 1; i <= variables.ids.len(); i++ ) {
+			docs.append( {
+				id: variables.ids[ i ],
+				text: variables.metadata[ i ].text ?: "",
+				metadata: variables.metadata[ i ],
+				vector: variables.vectors[ i ]
+			} );
+		}
+		return docs;
+	}
+
+	struct function getDocumentById( required string id ) {
+		for ( var i = 1; i <= variables.ids.len(); i++ ) {
+			if ( variables.ids[ i ] == arguments.id ) {
+				return {
+					id: variables.ids[ i ],
+					text: variables.metadata[ i ].text ?: "",
+					metadata: variables.metadata[ i ],
+					vector: variables.vectors[ i ]
+				};
+			}
+		}
+		return {};
+	}
+
+	boolean function deleteDocument( required string id ) {
+		for ( var i = 1; i <= variables.ids.len(); i++ ) {
+			if ( variables.ids[ i ] == arguments.id ) {
+				variables.vectors.deleteAt( i );
+				variables.metadata.deleteAt( i );
+				variables.ids.deleteAt( i );
+				return true;
+			}
+		}
+		return false;
+	}
+
+	numeric function deleteDocumentsByFilter( required struct filter ) {
+		var count = 0;
+		for ( var i = variables.ids.len(); i >= 1; i-- ) {
+			var matches = true;
+			for ( var key in arguments.filter ) {
+				if ( !variables.metadata[ i ].keyExists( key ) || variables.metadata[ i ][ key ] != arguments.filter[ key ] ) {
+					matches = false;
+					break;
+				}
+			}
+			if ( matches ) {
+				variables.vectors.deleteAt( i );
+				variables.metadata.deleteAt( i );
+				variables.ids.deleteAt( i );
+				count++;
+			}
+		}
+		return count;
+	}
+
+	IVectorMemory function clearCollection() {
+		variables.vectors = [];
+		variables.metadata = [];
+		variables.ids = [];
+		variables.dimension = 0;
+		return this;
+	}
+
+	IVectorMemory function createCollection( required string name ) {
+		variables.collection = arguments.name;
+		return clearCollection();
+	}
+
+	boolean function collectionExists( required string name ) {
+		return variables.collection == arguments.name && len( variables.collection );
+	}
+
+	IVectorMemory function deleteCollection( required string name ) {
+		if ( variables.collection == arguments.name ) {
+			clearCollection();
+			variables.collection = "";
+		}
+		return this;
+	}
+
+}

@@ -1,17 +1,20 @@
 # ═══════════════════════════════════════════════════════════════════════
 # wrangler.toml — Cloudflare Workers configuration
 #
-# Auto-generated for a SkyBox / MatchBox WebSocket app.
-# Modify binding names as needed for your project.
+# Auto-generated for a SkyBox WebSocket app.
+# Worker names follow the convention: skybox-<app>
 # ═══════════════════════════════════════════════════════════════════════
 
-name = "my-boxlang-ws-app"
+name = "skybox-app"
 main = "mcf-worker.js"
 compatibility_date = "2025-01-01"
 
-# WASM module containing the compiled BoxLang VM + bytecode
-[wasm_modules]
-worker = "dist/worker.wasm"
+# DO NOT add [wasm_modules] — the WASM is imported natively
+# via `import wasmModule from './worker.wasm'` in mcf-worker.js
+
+# Static assets (CSS, JS, images — optional, uncomment if needed)
+# [assets]
+# directory = "dist/assets"
 
 # Durable Object binding for the WebSocket host
 [[durable_objects.bindings]]
@@ -45,3 +48,8 @@ new_sqlite_classes = ["MatchBoxWebSocketDO"]
 # [[queues]]
 # binding = "QUEUE_MYQUEUE"
 # queue_name = "my-queue"
+
+# Vectorize (vector database for RAG)
+# [[vectorize]]
+# binding = "VECTORIZE"
+# index_name = "my-index"

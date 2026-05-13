@@ -1,0 +1,24 @@
+@BoxBIF
+class {
+
+	function invoke(
+		required string source,
+		struct config = {}
+	) {
+		var chunkSize = config.keyExists( "chunkSize" ) ? config.chunkSize : 0;
+		var overlap = config.keyExists( "overlap" ) ? config.overlap : 200;
+		var strategy = config.keyExists( "strategy" ) ? config.strategy : "recursive";
+
+		var doc = new Document(
+			content: arguments.source,
+			metadata: arguments.config
+		);
+
+		if ( chunkSize > 0 ) {
+			return doc.chunk( chunkSize, overlap, strategy );
+		}
+
+		return [ doc ];
+	}
+
+}

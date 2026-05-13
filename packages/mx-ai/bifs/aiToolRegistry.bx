@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — tool registry not available on WASM.
+	 */
+	function invoke() {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiToolRegistry() is not available on MatchBox/WASM."
+		);
+	}
+
+}

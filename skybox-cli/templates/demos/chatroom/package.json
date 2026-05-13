@@ -1,0 +1,13 @@
+{
+    "name": "skybox-chatroom",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "build": "bash build-multi.sh",
+        "dev": "npm run build && wrangler dev --local",
+        "deploy": "npm run build && wrangler deploy"
+    },
+    "devDependencies": {
+        "wrangler": "^4.0.0"
+    }
+}

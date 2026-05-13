@@ -1,0 +1,262 @@
+abstract class implements="IVectorMemory" {
+
+	property name="key" default="";
+	property name="userId" default="";
+	property name="conversationId" default="";
+	property name="collection" default="ai_memory";
+	property name="dimensions" type="numeric" default=0;
+	property name="adapter";
+
+	static {
+		DEFAULT_COLLECTION = "ai_memory";
+	}
+
+	function init(
+		required any adapter,
+		string key = createUUID(),
+		string userId = "",
+		string conversationId = "",
+		string collection = static.DEFAULT_COLLECTION
+	) {
+		variables.adapter = arguments.adapter;
+		variables.key = arguments.key;
+		variables.userId = arguments.userId;
+		variables.conversationId = arguments.conversationId;
+		variables.collection = arguments.collection;
+		return this;
+	}
+
+	function configure( required struct config ) {
+		if ( arguments.config.keyExists( "key" ) ) variables.key = config.key;
+		if ( arguments.config.keyExists( "userId" ) ) variables.userId = config.userId;
+		if ( arguments.config.keyExists( "conversationId" ) ) variables.conversationId = config.conversationId;
+		if ( arguments.config.keyExists( "collection" ) ) variables.collection = config.collection;
+		if ( arguments.config.keyExists( "dimensions" ) ) variables.dimensions = config.dimensions;
+		return this;
+	}
+
+	array function getRelevant(
+		required string query,
+		numeric limit = 5,
+		struct filter = {},
+		numeric minScore = 0.0,
+		string userId = "",
+		string conversationId = ""
+	) {
+		var embedding = generateEmbedding( arguments.query );
+		var results = findSimilar(
+			embedding: embedding,
+			limit: arguments.limit,
+			filter: arguments.filter,
+			userId: userId,
+			conversationId: conversationId
+		);
+		return results.filter( ( doc ) => doc.score >= minScore );
+	}
+
+	array function findSimilar(
+		required array embedding,
+		numeric limit = 5,
+		struct filter = {},
+		string userId = "",
+		string conversationId = ""
+	) {
+		var resolvedUserId = resolveUserId( userId );
+		var resolvedConversationId = resolveConversationId( conversationId );
+		var enhancedFilter = arguments.filter.duplicate();
+		if ( len( resolvedUserId ) ) enhancedFilter.userId = resolvedUserId;
+		if ( len( resolvedConversationId ) ) enhancedFilter.conversationId = resolvedConversationId;
+		return searchByVector(
+			embedding: arguments.embedding,
+			limit: arguments.limit,
+			filter: enhancedFilter
+		);
+	}
+
+	IVectorMemory function addWithId(
+		required string id,
+		required string text,
+		struct metadata = {},
+		string userId = "",
+		string conversationId = ""
+	) {
+		var embedding = generateEmbedding( arguments.text );
+		arguments.metadata.userId = resolveUserId( userId );
+		arguments.metadata.conversationId = resolveConversationId( conversationId );
+		storeDocument(
+			id: arguments.id,
+			text: arguments.text,
+			embedding: embedding,
+			metadata: arguments.metadata
+		);
+		return this;
+	}
+
+	IVectorMemory function add( required any message, string userId = "", string conversationId = "" ) {
+		var text = normalizeMessageText( arguments.message );
+		var metadata = extractMetadata( arguments.message );
+		var id = isStruct( arguments.message ) && arguments.message.keyExists( "id" )
+			? arguments.message.id
+			: generateId( text );
+		return addWithId( id, text, metadata, userId, conversationId );
+	}
+
+	array function getAll( string userId = "", string conversationId = "" ) {
+		var resolvedUserId = resolveUserId( userId );
+		var resolvedConversationId = resolveConversationId( conversationId );
+		var allDocuments = getAllDocuments();
+		if ( len( resolvedUserId ) || len( resolvedConversationId ) ) {
+			return allDocuments.filter( function( doc ) {
+				if ( len( resolvedUserId ) && ( isNull( doc.metadata.userId ) || doc.metadata.userId != resolvedUserId ) ) return false;
+				if ( len( resolvedConversationId ) && ( isNull( doc.metadata.conversationId ) || doc.metadata.conversationId != resolvedConversationId ) ) return false;
+				return true;
+			} );
+		}
+		return allDocuments;
+	}
+
+	numeric function count( string userId = "", string conversationId = "" ) {
+		return getAll( arguments.userId, arguments.conversationId ).len();
+	}
+
+	IVectorMemory function clear( string userId = "", string conversationId = "" ) {
+		var resolvedUserId = resolveUserId( userId );
+		var resolvedConversationId = resolveConversationId( conversationId );
+		if ( len( resolvedUserId ) || len( resolvedConversationId ) ) {
+			var filter = {};
+			if ( len( resolvedUserId ) ) filter.userId = resolvedUserId;
+			if ( len( resolvedConversationId ) ) filter.conversationId = resolvedConversationId;
+			this.removeWhere( filter );
+			return this;
+		}
+		clearCollection();
+		return this;
+	}
+
+	struct function getById( required string id ) {
+		return getDocumentById( arguments.id );
+	}
+
+	boolean function remove( required string id ) {
+		return deleteDocument( arguments.id );
+	}
+
+	numeric function removeWhere( required struct filter ) {
+		return deleteDocumentsByFilter( arguments.filter );
+	}
+
+	struct function seed( required array documents, string userId = "", string conversationId = "" ) {
+		var results = { added: 0, failed: 0, errors: [] };
+		var normalized = arguments.documents.map( ( doc ) => {
+			if ( isSimpleValue( doc ) ) {
+				return { id: generateId( doc ), text: doc, metadata: {} };
+			}
+			return {
+				id: doc.id ?: generateId( doc.text ?: doc.content ?: "" ),
+				text: doc.text ?: doc.content ?: "",
+				metadata: doc.metadata ?: {}
+			};
+		} );
+		var resolvedUserId = resolveUserId( userId );
+		var resolvedConversationId = resolveConversationId( conversationId );
+		normalized.each( doc => {
+			doc.metadata.userId = resolvedUserId;
+			doc.metadata.conversationId = resolvedConversationId;
+		} );
+		var texts = normalized.map( ( doc ) => doc.text );
+		var embeddings = generateEmbeddingBatch( texts );
+		normalized.each( ( doc, index ) => {
+			try {
+				storeDocument(
+					id = doc.id,
+					text = doc.text,
+					embedding = embeddings[ index ],
+					metadata = doc.metadata
+				);
+				results.added++;
+			} catch ( any e ) {
+				results.failed++;
+				results.errors.append( { id: doc.id, error: e.message } );
+			}
+		} );
+		return results;
+	}
+
+	private array function generateEmbedding( required string text ) {
+		return _generateEmbedding( arguments.text );
+	}
+
+	private array function _generateEmbedding( required string text ) {
+		var embedding = aiEmbed( input: arguments.text );
+		if ( variables.dimensions == 0 ) {
+			variables.dimensions = embedding.len();
+		}
+		return embedding;
+	}
+
+	private array function generateEmbeddingBatch( required array texts ) {
+		var embeddings = aiEmbed( input: arguments.texts, options: { returnFormat: "embeddings" } );
+		return embeddings;
+	}
+
+	private string function generateId( required string text ) {
+		return hash( arguments.text, "SHA-256" ).left( 32 );
+	}
+
+	private string function normalizeMessageText( required any message ) {
+		if ( isSimpleValue( arguments.message ) ) return arguments.message;
+		if ( isStruct( arguments.message ) ) return arguments.message.content ?: arguments.message.text ?: "";
+		return "";
+	}
+
+	private struct function extractMetadata( required any message ) {
+		var meta = {};
+		if ( isStruct( arguments.message ) ) {
+			if ( arguments.message.keyExists( "metadata" ) ) {
+				meta = arguments.message.metadata;
+			} else {
+				meta = arguments.message.duplicate();
+				meta.delete( "content" );
+				meta.delete( "text" );
+				meta.delete( "id" );
+			}
+		}
+		meta.userId = variables.userId;
+		meta.conversationId = variables.conversationId;
+		return meta;
+	}
+
+	private string function resolveUserId( string userId = "" ) {
+		return len( arguments.userId ) ? arguments.userId : variables.userId;
+	}
+
+	private string function resolveConversationId( string conversationId = "" ) {
+		return len( arguments.conversationId ) ? arguments.conversationId : variables.conversationId;
+	}
+
+	private numeric function cosineSimilarity( required array vec1, required array vec2 ) {
+		if ( arguments.vec1.len() != arguments.vec2.len() ) return 0;
+		var dot = 0;
+		var mag1 = 0;
+		var mag2 = 0;
+		for ( var i = 1; i <= arguments.vec1.len(); i++ ) {
+			dot = dot + arguments.vec1[ i ] * arguments.vec2[ i ];
+			mag1 = mag1 + arguments.vec1[ i ] * arguments.vec1[ i ];
+			mag2 = mag2 + arguments.vec2[ i ] * arguments.vec2[ i ];
+		}
+		mag1 = sqr( mag1 );
+		mag2 = sqr( mag2 );
+		if ( mag1 == 0 || mag2 == 0 ) return 0;
+		return dot / ( mag1 * mag2 );
+	}
+
+	abstract IVectorMemory function ensureCollection();
+	abstract IVectorMemory function storeDocument( required string id, required string text, required array embedding, required struct metadata );
+	abstract array function searchByVector( required array embedding, required numeric limit, required struct filter );
+	abstract array function getAllDocuments();
+	abstract struct function getDocumentById( required string id );
+	abstract boolean function deleteDocument( required string id );
+	abstract numeric function deleteDocumentsByFilter( required struct filter );
+	abstract IVectorMemory function clearCollection();
+
+}

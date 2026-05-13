@@ -1,0 +1,32 @@
+/**
+ * [MatchBox AI]
+ *
+ * Send a chat request to OpenRouter's free model router via the Rust→JS async callout bridge.
+ *
+ * This is the primary implemented BIF in mx-ai. It delegates the HTTP request to JavaScript
+ * (via the Cloudflare Workers BindingCall mechanism), which handles streaming SSE responses
+ * directly to the client WebSocket.
+ *
+ * The BoxLang VM yields during the HTTP request via a future, and is resumed by
+ * vm_complete_async() when the OpenRouter response is complete.
+ *
+ * @bindingName The Cloudflare Worker binding name for OpenRouter (e.g. "OPENROUTER")
+ * @messagesJson JSON-serialized array of message objects: [{role, content}, ...]
+ * @connectionId The WebSocket connection ID to stream responses to
+ *
+ * @return A future-yielding call. The actual response is streamed to the client by JS.
+ */
+@BoxBIF
+class {
+
+	function invoke(
+		required string bindingName,
+		required string messagesJson,
+		required string connectionId
+	) {
+		// Built into the MatchBox VM as a native Rust BIF.
+		// Signature: openRouterChat(bindingName, messagesJson, connectionId)
+		// See: crates/matchbox-cf-worker/src/bifs.rs
+	}
+
+}

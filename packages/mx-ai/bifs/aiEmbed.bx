@@ -1,0 +1,12 @@
+@BoxBIF
+class {
+
+	function invoke(
+		required any input,
+		struct params = {},
+		struct options = {}
+	) {
+		return mxaiEmbed( arguments.input, arguments.params, arguments.options );
+	}
+
+}

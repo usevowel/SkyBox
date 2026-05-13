@@ -1,0 +1,136 @@
+class {
+
+	property name="id" type="string" default="";
+	property name="content" type="string" default="";
+	property name="metadata" type="struct";
+	property name="embedding" type="array";
+
+	function init(
+		string id = "",
+		string content = "",
+		struct metadata = {},
+		array embedding = []
+	) {
+		variables.id        = arguments.id.len() ? arguments.id : createUUID();
+		variables.content   = trim( arguments.content );
+		variables.metadata  = arguments.metadata;
+		variables.embedding = arguments.embedding;
+		return this;
+	}
+
+	Document function setContent( required string content ) {
+		variables.content = trim( arguments.content );
+		return this;
+	}
+
+	boolean function hasContent() {
+		return getContentLength() > 0;
+	}
+
+	numeric function getContentLength() {
+		return len( variables.content );
+	}
+
+	string function preview( numeric length = 100 ) {
+		if ( getContentLength() <= arguments.length ) {
+			return variables.content;
+		}
+		return left( variables.content, arguments.length ) & "...";
+	}
+
+	numeric function getTokenCount() {
+		return ceiling( getContentLength() / 4 );
+	}
+
+	boolean function exceedsTokenLimit( required numeric maxTokens ) {
+		return getTokenCount() > arguments.maxTokens;
+	}
+
+	array function chunk(
+		numeric chunkSize = 1000,
+		numeric overlap = 200,
+		string strategy = "recursive"
+	) {
+		var chunks = TextChunker::chunk(
+			variables.content,
+			{ chunkSize: chunkSize, overlap: overlap, strategy: strategy }
+		);
+
+		var result = [];
+		var totalChunks = chunks.len();
+
+		for ( var i = 1; i <= totalChunks; i++ ) {
+			var chunkMetadata = duplicate( variables.metadata );
+			chunkMetadata.chunkIndex  = i;
+			chunkMetadata.totalChunks = totalChunks;
+			chunkMetadata.isChunk     = true;
+			chunkMetadata.parentId    = variables.id;
+
+			result.append(
+				new Document(
+					content  : chunks[ i ],
+					metadata : chunkMetadata
+				)
+			);
+		}
+
+		return result;
+	}
+
+	struct function validate(
+		numeric minLength = 0,
+		numeric maxLength = 0,
+		array requiredMetadata = []
+	) {
+		var errors = [];
+		if ( !hasContent() ) errors.append( "Document has no content" );
+		if ( minLength > 0 && getContentLength() < minLength ) errors.append( "Content too short" );
+		if ( maxLength > 0 && getContentLength() > maxLength ) errors.append( "Content too long" );
+		return { valid: errors.len() == 0, errors: errors };
+	}
+
+	string function getHash( string algorithm = "MD5" ) {
+		return hash( variables.content, arguments.algorithm );
+	}
+
+	any function getMeta( required string key, any defaultValue = "" ) {
+		return variables.metadata[ arguments.key ] ?: arguments.defaultValue;
+	}
+
+	Document function setMeta( required string key, required any value ) {
+		variables.metadata[ arguments.key ] = arguments.value;
+		return this;
+	}
+
+	boolean function hasEmbedding() {
+		return variables.embedding.len() > 0;
+	}
+
+	struct function toStruct() {
+		return {
+			"id"        : variables.id,
+			"content"   : variables.content,
+			"metadata"  : variables.metadata,
+			"embedding" : variables.embedding,
+			"hash"      : getHash()
+		};
+	}
+
+	static function fromStruct( required struct data ) {
+		return new Document(
+			id        : data?.id ?: "",
+			content   : data?.content ?: "",
+			metadata  : data?.metadata ?: {},
+			embedding : data?.embedding ?: []
+		);
+	}
+
+	Document function clone() {
+		return new Document(
+			content   : variables.content,
+			metadata  : duplicate( variables.metadata ),
+			embedding : duplicate( variables.embedding )
+		);
+	}
+
+}

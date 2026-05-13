@@ -28,7 +28,7 @@ pub struct RequestData {
     pub query: HashMap<String, String>,
     pub cookies: HashMap<String, String>,
     pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
+    pub body: String,
     pub full_url: String,
 }
 
@@ -58,6 +58,15 @@ pub enum CalloutMessage {
         code: u16,
         reason: String,
     },
+    /// Call a Cloudflare binding (D1, R2, KV, Queue, etc.)
+    /// The binding name + action + args are forwarded to the JS host.
+    #[serde(rename = "binding_call")]
+    BindingCall {
+        async_id: u64,
+        binding_name: String,
+        action: String,
+        args: serde_json::Value,
+    },
 }
 
 /// Result of processing a callout — the response from JS (or test harness).
@@ -67,6 +76,13 @@ pub struct CalloutResult {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// For async binding calls: the async_id to poll/resolve later.
+    /// 0 means synchronous completion.
+    #[serde(default)]
+    pub async_id: u64,
+    /// Result data from binding calls (query results, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 /// Bridge for communicating between the Rust VM and the JS host.

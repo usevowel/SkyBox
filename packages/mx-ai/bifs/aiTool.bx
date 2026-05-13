@@ -1,0 +1,19 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — tools not available on WASM.
+	 */
+	function invoke(
+		required any name,
+		string description = "",
+		any callable,
+		boolean autoRegister = true
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiTool() is not available on MatchBox/WASM."
+		);
+	}
+
+}

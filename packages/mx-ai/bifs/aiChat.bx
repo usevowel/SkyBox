@@ -1,0 +1,19 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Not available on MatchBox/WASM. Use openRouterChat() BIF + JS streaming bridge instead.
+	 */
+	function invoke(
+		required any messages,
+		struct params = {},
+		struct options = {},
+		struct headers = {}
+	) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiChat() is not available on MatchBox/WASM. Use the Rust-level openRouterChat() BIF which delegates to JS via the callout bridge."
+		);
+	}
+
+}

@@ -1,0 +1,14 @@
+@BoxBIF
+class {
+
+	/**
+	 * @todo Stub — service registry not available on WASM.
+	 */
+	function invoke(string provider, any options = {}) {
+		throw(
+			type: "UnsupportedInMatchBox",
+			message: "aiService() is not available on MatchBox/WASM. The provider service model requires JVM BoxLang. Use the Rust-level openRouterChat() BIF directly."
+		);
+	}
+
+}

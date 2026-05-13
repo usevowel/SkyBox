@@ -1,0 +1,20 @@
+class {
+
+	function load( required string text, struct metadata = {} ) {
+		return [ {
+			content: arguments.text,
+			metadata: arguments.metadata
+		} ];
+	}
+
+	function loadLines( required string text, struct metadata = {} ) {
+		var lines = listToArray( arguments.text, chr(10), false, true );
+		return lines.filter( ( line ) => len( trim( line ) ) > 0 ).map( ( line ) => {
+			return {
+				content: line,
+				metadata: arguments.metadata
+			};
+		} );
+	}
+
+}

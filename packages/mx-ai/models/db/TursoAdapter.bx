@@ -1,0 +1,28 @@
+class extends="D1Adapter" {
+
+	function init( required string bindingName ) {
+		super.init( arguments.bindingName );
+		return this;
+	}
+
+	array function query( required string sql, array params = [] ) {
+		return tursoQuery( variables.bindingName, arguments.sql, arguments.params );
+	}
+
+	numeric function execute( required string sql, array params = [] ) {
+		return tursoExecute( variables.bindingName, arguments.sql, arguments.params );
+	}
+
+	array function batch( required array statements ) {
+		var results = [];
+		for ( var stmt in arguments.statements ) {
+			if ( isArray( stmt ) && stmt.len() >= 2 ) {
+				results.append( tursoExecute( variables.bindingName, stmt[ 1 ], stmt[ 2 ] ?: [] ) );
+			} else {
+				results.append( tursoExecute( variables.bindingName, stmt, [] ) );
+			}
+		}
+		return results;
+	}
+
+}
