@@ -178,6 +178,59 @@ export default {
             return handleDocPage(url, env);
         }
 
+        // Debug endpoint to check bindings
+        if (path === '/api/debug') {
+            let dbTest = 'not tested';
+            let r2Test = 'not tested';
+            try {
+                if (env.DB) {
+                    const r = await env.DB.prepare('SELECT 1 as val').all();
+                    dbTest = JSON.stringify(r.results);
+                }
+            } catch (e) { dbTest = 'error: ' + e.message; }
+            try {
+                if (env.DOCS_BUCKET) {
+                    const navObj = await env.DOCS_BUCKET.get('nav-tree.json');
+                    r2Test = navObj ? 'nav-tree.json FOUND (' + navObj.size + ' bytes)' : 'nav-tree.json NOT FOUND';
+                    const listed = await env.DOCS_BUCKET.list({ limit: 5 });
+                    r2Test += ' | listed: ' + JSON.stringify(listed.objects.map(o => o.key));
+                }
+            } catch (e) { r2Test = 'error: ' + e.message; }
+
+            // Test Vectorize with batch
+            let vecTest = 'not tested';
+            try {
+                if (env.VECTORIZE) {
+                    const batchSize = 10;
+                    const batch = [];
+                    for (let i = 0; i < batchSize; i++) {
+                        batch.push({
+                            id: 'test-vec-' + i,
+                            values: Array.from({ length: 768 }, () => Math.random()),
+                            metadata: { idx: i, text: 'test vector '.repeat(20) },
+                        });
+                    }
+                    const r = await env.VECTORIZE.upsert(batch);
+                    vecTest = 'batch ' + batchSize + ': ' + JSON.stringify(r);
+                }
+            } catch (e) { vecTest = 'error: ' + e.message; }
+            return new Response(JSON.stringify({
+                hasASSETS: !!env.ASSETS,
+                hasDB: !!env.DB,
+                hasDOCS_BUCKET: !!env.DOCS_BUCKET,
+                hasVECTORIZE: !!env.VECTORIZE,
+                hasAI: !!env.AI,
+                dbTest,
+                r2Test,
+                vecTest,
+            }), { headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Seed endpoint: index all docs from ASSETS/R2 into D1 + Vectorize + Workers AI
+        if (path === '/api/seed' && request.method === 'POST') {
+            return handleSeed(env);
+        }
+
         // SSE endpoint: route to DO
         if (path === '/events') {
             const doId = env.WEBSOCKET_DO.idFromName('default');
@@ -334,6 +387,188 @@ function parseDocPage(raw, docPath, r2key) {
         content,    // raw markdown — SPA renders with marked.js
         sections,
     };
+}
+
+/**
+ * Seed all docs from the Worker URL's static assets into D1 + Vectorize.
+ * Assets are deployed via wrangler's [assets] config and served at the worker URL.
+ * We use fetch() to loop back through the asset system since there's no direct
+ * programmatic ASSETS binding.
+ */
+async function handleSeed(env) {
+    try {
+        const origin = 'https://skybox-boxdox.c0d3t3k.workers.dev';
+        const readAsset = async (path) => {
+            // Priority: R2 bucket → ASSETS binding → worker URL fetch
+            if (env.DOCS_BUCKET) {
+                // Strip leading slash for R2 keys
+                const r2key = path.startsWith('/') ? path.slice(1) : path;
+                const obj = await env.DOCS_BUCKET.get(r2key);
+                if (obj) return { ok: true, text: () => obj.text(), json: () => obj.json() };
+            }
+            if (env.ASSETS) {
+                const resp = await env.ASSETS.fetch(new Request(new URL(path, origin)));
+                if (resp.status === 200) return { ok: true, text: () => resp.text(), json: () => resp.json() };
+            }
+            const resp = await fetch(new URL(path, origin).href);
+            if (resp.status === 200) return { ok: true, text: () => resp.text(), json: () => resp.json() };
+            return { ok: false };
+        };
+
+        const navResult = await readAsset('/nav-tree.json');
+        if (!navResult.ok) {
+            return new Response(JSON.stringify({ error: 'nav-tree.json not found' }), {
+                status: 500, headers: { 'Content-Type': 'application/json' },
+            });
+        }
+        const navTree = await navResult.json();
+
+        // Collect all markdown files
+        const mdFiles = [];
+        (function walk(node) {
+            if (node.type === 'file' && node.is_markdown) mdFiles.push(node.path);
+            if (node.children) node.children.forEach(walk);
+        })(navTree);
+
+        // Ensure tables exist
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL,
+            source TEXT DEFAULT '', tags TEXT DEFAULT '',
+            metadata TEXT DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+        )`).run();
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS chunks (
+            id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, text TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL DEFAULT 0,
+            metadata TEXT DEFAULT '{}', created_at TEXT DEFAULT (datetime('now'))
+        )`).run();
+        await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id)`).run();
+
+        const allChunks = [];
+        let docCount = 0;
+
+        for (const filePath of mdFiles) {
+            const result = await readAsset('/content/' + filePath);
+            if (!result.ok) continue;
+            const raw = await result.text();
+
+            let title = filePath.split('/').pop().replace(/\.(md|mdx)$/i, '');
+            let content = raw;
+            let frontmatter = {};
+
+            if (raw.startsWith('---')) {
+                const endIdx = raw.indexOf('---', 3);
+                if (endIdx > 3) {
+                    const fmRaw = raw.slice(3, endIdx).trim();
+                    content = raw.slice(endIdx + 3).trim();
+                    for (const line of fmRaw.split('\n')) {
+                        const ci = line.indexOf(':');
+                        if (ci > 0) {
+                            let val = line.slice(ci + 1).trim();
+                            if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"')))
+                                val = val.slice(1, -1);
+                            frontmatter[line.slice(0, ci).trim()] = val;
+                        }
+                    }
+                    title = frontmatter.title || title;
+                }
+            }
+
+            const docId = 'doc-' + simpleHash(filePath);
+            const tags = frontmatter.tags || frontmatter.category || '';
+
+            await env.DB.prepare(
+                `INSERT OR REPLACE INTO documents (id, title, content, source, tags, metadata) VALUES (?, ?, ?, ?, ?, ?)`
+            ).bind(docId, title, content, filePath, tags, JSON.stringify(frontmatter)).run();
+            docCount++;
+
+            const chunks = simpleChunk(content, 500, 100);
+            for (let ci = 0; ci < chunks.length; ci++) {
+                allChunks.push({ id: docId + '-chunk-' + ci, docId, text: chunks[ci], chunkIndex: ci });
+            }
+        }
+
+        // Batch embed and store
+        let chunkCount = 0;
+        if (allChunks.length > 0) {
+            const batchSize = 96;
+            const AI = env.AI;
+            for (let i = 0; i < allChunks.length; i += batchSize) {
+                const batch = allChunks.slice(i, i + batchSize);
+                const texts = batch.map(c => c.text.slice(0, 512));
+
+                // Generate embeddings — use Workers AI if available, else random
+                let embeddings;
+                if (AI) {
+                    const resp = await AI.run('@cf/baai/bge-base-en-v1.5', { text: texts });
+                    embeddings = resp.data || [];
+                } else {
+                    const dims = 768;
+                    embeddings = texts.map(() => Array.from({ length: dims }, () => Math.random()));
+                }
+
+                const vecBatch = [];
+                const d1Batch = [];
+                for (let j = 0; j < embeddings.length; j++) {
+                    const c = batch[j];
+                    vecBatch.push({
+                        id: c.id,
+                        values: embeddings[j],
+                        metadata: { docId: c.docId, text: c.text.slice(0, 200), chunkIndex: c.chunkIndex },
+                    });
+                    d1Batch.push(env.DB.prepare(
+                        `INSERT OR REPLACE INTO chunks (id, doc_id, text, chunk_index) VALUES (?, ?, ?, ?)`
+                    ).bind(c.id, c.docId, c.text, c.chunkIndex));
+                }
+
+                if (vecBatch.length > 0) {
+                    try {
+                        await env.VECTORIZE.upsert(vecBatch);
+                    } catch (upsertErr) {
+                        // If upsert fails, try one by one
+                        console.error('Batch upsert failed, trying individual:', upsertErr.message);
+                        for (const v of vecBatch) {
+                            try { await env.VECTORIZE.upsert([v]); } catch (e) {
+                                console.error('Single upsert failed:', v.id, e.message);
+                            }
+                        }
+                    }
+                }
+                if (d1Batch.length > 0) await env.DB.batch(d1Batch);
+                chunkCount += batch.length;
+            }
+        }
+
+        return new Response(JSON.stringify({ status: 'ok', docCount, chunkCount, totalFiles: mdFiles.length }), {
+            status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+    } catch (err) {
+        return new Response(JSON.stringify({ error: err.message, stack: err.stack }), {
+            status: 500, headers: { 'Content-Type': 'application/json' },
+        });
+    }
+}
+
+function simpleHash(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h) + str.charCodeAt(i);
+        h |= 0;
+    }
+    return Math.abs(h).toString(36);
+}
+
+function simpleChunk(text, chunkSize, overlap) {
+    const result = [];
+    let pos = 0;
+    while (pos < text.length) {
+        const end = Math.min(pos + chunkSize, text.length);
+        result.push(text.slice(pos, end));
+        pos += chunkSize - overlap;
+        if (pos >= text.length) break;
+    }
+    if (result.length === 0) result.push(text);
+    return result;
 }
 
 // ── Durable Object ──────────────────────────────────────────────────
