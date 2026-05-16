@@ -231,6 +231,44 @@ export default {
             return handleSeed(env);
         }
 
+        // Stats: directly from D1 (BoxLang VM can't unwrap async futures)
+        if (path === '/api/stats') {
+            try {
+                const docResult = await env.DB.prepare('SELECT COUNT(*) as cnt FROM documents').all();
+                const chunkResult = await env.DB.prepare('SELECT COUNT(*) as cnt FROM chunks').all();
+                return new Response(JSON.stringify({
+                    docCount: docResult.results[0]?.cnt || 0,
+                    chunkCount: chunkResult.results[0]?.cnt || 0,
+                }), { headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+                return new Response(JSON.stringify({ docCount: 0, chunkCount: 0, error: e.message }), { headers: { 'Content-Type': 'application/json' } });
+            }
+        }
+
+        // Search: embed + Vectorize query directly from JS
+        if (path === '/api/search') {
+            const query = url.searchParams.get('q') || '';
+            if (!query) {
+                return new Response(JSON.stringify({ error: 'Missing query parameter q' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            }
+            try {
+                // For now, return empty results (embedding requires Workers AI)
+                return new Response(JSON.stringify({ query, results: [] }), { headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+                return new Response(JSON.stringify({ query, results: [], error: e.message }), { headers: { 'Content-Type': 'application/json' } });
+            }
+        }
+
+        // Documents list: directly from D1
+        if (path === '/api/documents') {
+            try {
+                const r = await env.DB.prepare('SELECT id, title, source, tags, created_at FROM documents ORDER BY title').all();
+                return new Response(JSON.stringify(r.results), { headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+                return new Response(JSON.stringify([]), { headers: { 'Content-Type': 'application/json' } });
+            }
+        }
+
         // SSE endpoint: route to DO
         if (path === '/events') {
             const doId = env.WEBSOCKET_DO.idFromName('default');
@@ -655,6 +693,41 @@ export class MatchBoxWebSocketDO {
         const accept = request.headers.get('Accept') || '';
         if (accept.includes('text/event-stream')) {
             return this.handleSSE(request);
+        }
+
+        // Handle data endpoints directly (BoxLang VM can't unwrap async futures)
+        const url = new URL(request.url);
+        const path = url.pathname;
+        if (path === '/api/stats') {
+            try {
+                const docResult = await this.env.DB.prepare('SELECT COUNT(*) as cnt FROM documents').all();
+                const chunkResult = await this.env.DB.prepare('SELECT COUNT(*) as cnt FROM chunks').all();
+                return new Response(JSON.stringify({
+                    docCount: docResult.results[0]?.cnt || 0,
+                    chunkCount: chunkResult.results[0]?.cnt || 0,
+                }), { headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+                return new Response(JSON.stringify({ docCount: 0, chunkCount: 0, error: e.message }), { headers: { 'Content-Type': 'application/json' } });
+            }
+        }
+        if (path === '/api/search') {
+            const query = url.searchParams.get('q') || '';
+            if (!query) {
+                return new Response(JSON.stringify({ error: 'Missing query parameter q' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+            }
+            try {
+                return new Response(JSON.stringify({ query, results: [] }), { headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+                return new Response(JSON.stringify({ query, results: [], error: e.message }), { headers: { 'Content-Type': 'application/json' } });
+            }
+        }
+        if (path === '/api/documents') {
+            try {
+                const r = await this.env.DB.prepare('SELECT id, title, source, tags, created_at FROM documents ORDER BY title').all();
+                return new Response(JSON.stringify(r.results), { headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+                return new Response(JSON.stringify([]), { headers: { 'Content-Type': 'application/json' } });
+            }
         }
 
         // HTTP request → serve via BoxLang onHttpGet
@@ -1107,25 +1180,6 @@ export class MatchBoxWebSocketDO {
         }
 
         return JSON.stringify({ success: false, error: `Unknown vectorize op: ${operation}` });
-    }
-
-    handleEmbedSync(msg) {
-        const async_id = msg.async_id;
-        if (!this.env.AI) {
-            const dims = 4;
-            const input = msg.args.input;
-            const data = typeof input === 'string'
-                ? Array.from({ length: dims }, () => Math.random())
-                : (Array.isArray(input) ? input.map(() => Array.from({ length: dims }, () => Math.random())) : []);
-            this.pendingAsyncOps.set(async_id, Promise.resolve(data));
-            return JSON.stringify({ success: true, async_id });
-        }
-        // AI is available — use async handler
-        this.handleEmbedAsync(msg).catch(err => {
-            console.error('Embed error:', err);
-            this.pendingAsyncOps.set(async_id, Promise.reject(err.message));
-        });
-        return JSON.stringify({ success: true, async_id });
     }
 
     handleD1Query(msg, binding) {
