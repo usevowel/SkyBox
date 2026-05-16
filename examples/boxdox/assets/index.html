@@ -114,6 +114,39 @@ a:hover { text-decoration:underline; }
 .empty-state { text-align:center; padding:80px 20px; color:var(--text-3); }
 .empty-state h2 { font-size:20px; margin-bottom:8px; color:var(--text-2); }
 .empty-state p { font-size:14px; }
+/* ── RAG Debug Panel ── */
+.rag-debug-fab { position:fixed; bottom:20px; left:20px; width:48px; height:48px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#2563eb); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 14px rgba(59,130,246,0.4); z-index:9998; transition:all 0.3s; color:#fff; font-size:20px; }
+.rag-debug-fab:hover { transform:translateY(-2px) scale(1.05); }
+.rag-debug-dialog { position:fixed; bottom:80px; left:20px; width:560px; max-height:65vh; background:var(--bg-2); border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,0.5); display:flex; flex-direction:column; z-index:9997; overflow:hidden; border:1px solid var(--border); font-size:13px; }
+.rag-debug-dialog.hidden { display:none; }
+.rag-debug-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:linear-gradient(135deg,#3b82f6,#2563eb); color:#fff; flex-shrink:0; cursor:grab; user-select:none; }
+.rag-debug-header h3 { margin:0; font-size:14px; font-weight:600; display:flex; align-items:center; gap:6px; }
+.rag-debug-close { background:rgba(255,255,255,0.2); border:none; color:#fff; width:26px; height:26px; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; }
+.rag-debug-close:hover { background:rgba(255,255,255,0.3); }
+.rag-debug-tabs { display:flex; border-bottom:1px solid var(--border); flex-shrink:0; }
+.rag-debug-tab { flex:1; padding:10px; border:none; background:transparent; color:var(--text-2); cursor:pointer; font-size:12px; transition:all 0.15s; }
+.rag-debug-tab:hover { color:var(--text); background:var(--bg-3); }
+.rag-debug-tab.active { color:var(--accent); border-bottom:2px solid var(--accent); }
+.rag-debug-body { flex:1; overflow-y:auto; padding:12px; }
+.rag-debug-body .doc-item { padding:8px 10px; border:1px solid var(--border); border-radius:6px; margin-bottom:6px; font-size:12px; }
+.rag-debug-body .doc-item .path { color:var(--text-3); font-size:11px; }
+.rag-debug-body .doc-item .count { color:var(--green); font-size:11px; }
+.rag-debug-body .result-item { padding:8px 10px; border:1px solid var(--border); border-radius:6px; margin-bottom:6px; }
+.rag-debug-body .result-item .src { color:var(--accent); font-size:11px; }
+.rag-debug-body .result-item .score { color:var(--green); font-size:11px; }
+.rag-debug-body .result-item .text { color:var(--text-2); font-size:12px; margin-top:4px; max-height:60px; overflow:hidden; }
+.rag-debug-body .result-item .text:hover { max-height:none; }
+.rag-debug-input-wrap { display:flex; gap:6px; padding:10px 12px; border-top:1px solid var(--border); flex-shrink:0; }
+.rag-debug-input-wrap input { flex:1; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-3); color:var(--text); font-size:12px; outline:none; }
+.rag-debug-input-wrap input:focus { border-color:var(--accent); }
+.rag-debug-input-wrap button { padding:6px 12px; border-radius:6px; border:none; background:var(--accent); color:#fff; font-size:12px; cursor:pointer; }
+.rag-debug-status { display:flex; align-items:center; gap:6px; padding:6px 12px; border-top:1px solid var(--border); font-size:11px; color:var(--text-3); flex-shrink:0; }
+.rag-debug-status .dot { width:8px; height:8px; border-radius:50%; }
+.rag-debug-status .dot.green { background:var(--green); }
+.rag-debug-status .dot.yellow { background:var(--orange); }
+.rag-debug-status .dot.red { background:var(--red); }
+/* ── Voice Agent ── */
+.vowel-agent-container { position:fixed; bottom:20px; right:20px; z-index:9999; }
 @media (max-width:1024px) { .toc { display:none; } .content { padding:24px; } }
 @media (max-width:768px) {
     .sidebar { display:none; }
@@ -170,6 +203,37 @@ a:hover { text-decoration:underline; }
   <h2 id="searchTitle">Search Results</h2>
   <div id="searchResults"></div>
 </div>
+
+<!-- ── RAG Debug Panel ── -->
+<button class="rag-debug-fab" id="ragDebugFab" title="RAG Debug" onclick="toggleRagDebug()">&#128300;</button>
+<div class="rag-debug-dialog hidden" id="ragDebugDialog">
+  <div class="rag-debug-header" id="ragDebugHeader">
+    <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> RAG Debug</h3>
+    <button class="rag-debug-close" onclick="toggleRagDebug()">&times;</button>
+  </div>
+  <div class="rag-debug-tabs">
+    <button class="rag-debug-tab active" data-tab="documents" onclick="switchRagTab('documents')">Documents</button>
+    <button class="rag-debug-tab" data-tab="chat" onclick="switchRagTab('chat')">Search</button>
+  </div>
+  <div class="rag-debug-body" id="ragDebugBody">
+    <div id="ragTabDocuments"><div class="loading"><div class="spinner"></div><span>Loading...</span></div></div>
+    <div id="ragTabChat" style="display:none">
+      <div id="ragChatResults"></div>
+    </div>
+  </div>
+  <div class="rag-debug-input-wrap" id="ragDebugInputWrap">
+    <input id="ragDebugInput" type="text" placeholder="Test RAG query..." onkeydown="if(event.key==='Enter')doRagSearch()">
+    <button onclick="doRagSearch()">Search</button>
+  </div>
+  <div class="rag-debug-status" id="ragDebugStatus">
+    <span class="dot green" id="ragStatusDot"></span>
+    <span id="ragStatusText">Connected</span>
+  </div>
+</div>
+
+<!-- ── Vowel Voice Agent Container ── -->
+<div class="vowel-agent-container" id="vowelContainer"></div>
+
 <script>
 (function() {
   const cid = crypto.randomUUID();
@@ -344,10 +408,10 @@ a:hover { text-decoration:underline; }
     });
   }
 
-  function esc(s) {
+  window.esc = function(s) {
     if (typeof s !== "string") return String(s);
     return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-  }
+  };
 
   function buildNav(tree, depth) {
     if (!tree || !tree.children) return "";
@@ -420,6 +484,201 @@ a:hover { text-decoration:underline; }
     }
   });
 })();
+
+// ── RAG Debug Panel ──
+
+window.toggleRagDebug = function() {
+  const dialog = document.getElementById("ragDebugDialog");
+  dialog.classList.toggle("hidden");
+  if (!dialog.classList.contains("hidden") && document.getElementById("ragTabDocuments").querySelector(".loading")) {
+    loadRagDocuments();
+  }
+};
+
+window.switchRagTab = function(tab) {
+  document.querySelectorAll(".rag-debug-tab").forEach(function(t) { t.classList.remove("active"); });
+  document.querySelector('.rag-debug-tab[data-tab="' + tab + '"]').classList.add("active");
+  document.getElementById("ragTabDocuments").style.display = tab === "documents" ? "" : "none";
+  document.getElementById("ragTabChat").style.display = tab === "chat" ? "" : "none";
+  document.getElementById("ragDebugInputWrap").style.display = tab === "chat" ? "" : "none";
+  if (tab === "documents" && document.getElementById("ragTabDocuments").querySelector(".loading")) {
+    loadRagDocuments();
+  }
+};
+
+window.loadRagDocuments = function() {
+  document.getElementById("ragTabDocuments").innerHTML = '<div class="loading"><div class="spinner"></div><span>Loading docs...</span></div>';
+  document.getElementById("ragStatusText").textContent = "Loading...";
+  document.getElementById("ragStatusDot").className = "dot yellow";
+  fetch("/api/documents").then(function(r){ return r.json(); }).then(function(docs) {
+    const statsUrl = "/api/stats";
+    return fetch(statsUrl).then(function(sr){ return sr.json(); }).then(function(stats) {
+      return { docs: docs, stats: stats };
+    });
+  }).then(function(data) {
+    const docs = data.docs;
+    const stats = data.stats;
+    var html = '<div style="display:flex;gap:12px;margin-bottom:10px;font-size:11px;color:var(--text-3)">' +
+      '<span>Docs: <strong style="color:var(--text)">' + stats.docCount + '</strong></span>' +
+      '<span>Chunks: <strong style="color:var(--text)">' + stats.chunkCount + '</strong></span></div>';
+    var folders = {};
+    docs.forEach(function(d) {
+      var parts = d.source.split("/");
+      var folder = parts.slice(0, -1).join(" > ") || "(root)";
+      if (!folders[folder]) folders[folder] = [];
+      folders[folder].push(d);
+    });
+    Object.keys(folders).sort().forEach(function(f) {
+      html += "<div style='font-weight:600;font-size:12px;color:var(--text-2);padding:6px 0 2px'>" + f + " (" + folders[f].length + ")</div>";
+      folders[f].slice(0, 10).forEach(function(d) {
+        html += "<div class=doc-item><div>" + esc(d.title) +
+          " <span class=count>(" + (d.chunkCount || "?") + " chunks)</span></div>" +
+          "<div class=path>" + esc(d.source) + "</div></div>";
+      });
+      if (folders[f].length > 10) {
+        html += "<div style='color:var(--text-3);font-size:11px;padding:2px 10px'>+" + (folders[f].length - 10) + " more</div>";
+      }
+    });
+    document.getElementById("ragTabDocuments").innerHTML = html;
+    document.getElementById("ragStatusText").textContent = stats.docCount + " docs, " + stats.chunkCount + " chunks indexed";
+    document.getElementById("ragStatusDot").className = "dot green";
+  }).catch(function(err) {
+    document.getElementById("ragTabDocuments").innerHTML = "<p style='color:var(--red);padding:12px'>Error: " + err.message + "</p>";
+    document.getElementById("ragStatusText").textContent = "Error loading";
+    document.getElementById("ragStatusDot").className = "dot red";
+  });
+};
+
+window.doRagSearch = function() {
+  const q = document.getElementById("ragDebugInput").value.trim();
+  if (!q) return;
+  document.getElementById("ragChatResults").innerHTML = '<div class="loading"><div class="spinner"></div><span>Searching...</span></div>';
+  document.getElementById("ragStatusText").textContent = "Searching...";
+  document.getElementById("ragStatusDot").className = "dot yellow";
+  fetch("/api/search?q=" + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(data) {
+    var results = data.results || [];
+    if (results.length === 0) {
+      document.getElementById("ragChatResults").innerHTML = "<p style='color:var(--text-3);padding:12px'>No results found.</p>";
+    } else {
+      var html = "<p style='font-size:11px;color:var(--text-3);margin-bottom:8px'>Found " + results.length + " matches</p>";
+      results.forEach(function(r) {
+        html += "<div class=result-item>" +
+          "<div><span class=src>" + esc(r.metadata?.path || r.docId || "") + "</span>" +
+          " <span class=score>[" + (r.score * 100).toFixed(0) + "%]</span></div>" +
+          "<div class=text>" + esc(r.text || "") + "</div></div>";
+      });
+      document.getElementById("ragChatResults").innerHTML = html;
+    }
+    document.getElementById("ragStatusText").textContent = results.length + " results";
+    document.getElementById("ragStatusDot").className = "dot green";
+  }).catch(function(err) {
+    document.getElementById("ragChatResults").innerHTML = "<p style='color:var(--red)'>Error: " + err.message + "</p>";
+    document.getElementById("ragStatusText").textContent = "Error";
+    document.getElementById("ragStatusDot").className = "dot red";
+  });
+};
+
+// Update rag_debug SSE handler to also feed RAG debug panel
+var origShowRagInfo = window.showRagInfo;
+window.showRagInfo = function(chunks) {
+  if (origShowRagInfo) origShowRagInfo(chunks);
+  const el = document.getElementById("ragStatusText");
+  const dot = document.getElementById("ragStatusDot");
+  if (chunks && chunks.length > 0) {
+    el.textContent = chunks.length + " sources in last AI response";
+    dot.className = "dot green";
+  }
+};
+</script>
+
+<!-- ── Vowel Voice Agent Module ── -->
+<script type="module">
+import { Vowel } from 'https://cdn.jsdelivr.net/npm/@vowel.to/client/dist/client/index.mjs';
+
+const vowelConfig = window.__VOWEL_CONFIG__ || {};
+const appId = vowelConfig.appId || vowelConfig.apiKey || '';
+
+async function initVowelAgent() {
+  if (!appId) {
+    console.log('[vowel] No appId configured — voice agent disabled. Set window.__VOWEL_CONFIG__ = { appId: "..." }');
+    return;
+  }
+
+  const client = new Vowel({
+    appId: appId,
+    realtimeUrl: vowelConfig.url || 'wss://realtime.vowel.to/v1',
+  });
+
+  const actions = {
+    searchKnowledgeBase: {
+      name: 'searchKnowledgeBase',
+      description: 'Search the BoxLang documentation knowledge base for relevant context',
+      handler: async function(args) {
+        const query = args.query || args.text || '';
+        if (!query) return { error: 'Missing query' };
+        try {
+          const r = await fetch('/api/search?q=' + encodeURIComponent(query));
+          const data = await r.json();
+          return { results: data.results || [] };
+        } catch (err) {
+          return { error: err.message, results: [] };
+        }
+      },
+    },
+    navigateToDoc: {
+      name: 'navigateToDoc',
+      description: 'Navigate to a documentation page by path',
+      handler: async function(args) {
+        const path = args.path || '';
+        if (!path) return { error: 'Missing path' };
+        window.loadDoc(path);
+        return { success: true, path: path };
+      },
+    },
+    getCurrentPageInfo: {
+      name: 'getCurrentPageInfo',
+      description: 'Get information about the currently viewed documentation page',
+      handler: function() {
+        const title = document.title;
+        const content = document.getElementById('content');
+        const headings = content ? Array.from(content.querySelectorAll('h1,h2,h3')).map(function(h) {
+          return { level: parseInt(h.tagName[1]), text: h.textContent };
+        }) : [];
+        return { title: title, sections: headings };
+      },
+    },
+    searchDocRoutes: {
+      name: 'searchDocRoutes',
+      description: 'Search documentation page titles and routes',
+      handler: async function(args) {
+        const query = (args.query || '').toLowerCase();
+        if (!query) return { results: [] };
+        const items = document.querySelectorAll('.nav-item[data-path]');
+        const matches = [];
+        items.forEach(function(el) {
+          const path = el.dataset.path;
+          const label = el.querySelector('.label');
+          const title = label ? label.textContent : '';
+          if (path && (path.toLowerCase().includes(query) || title.toLowerCase().includes(query))) {
+            matches.push({ path: path, title: title });
+          }
+        });
+        return { results: matches.slice(0, 10) };
+      },
+    },
+  };
+
+  try {
+    await client.registerActions(actions);
+    client.start();
+    window.__vowelClient = client;
+    console.log('[vowel] Agent initialized');
+  } catch (err) {
+    console.warn('[vowel] Init error:', err);
+  }
+}
+
+initVowelAgent();
 </script>
 </body>
 </html>

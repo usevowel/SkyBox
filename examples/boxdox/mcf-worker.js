@@ -619,6 +619,7 @@ export class MatchBoxWebSocketDO {
         this.pendingAsyncOps = new Map();
         this.nextAsyncOpId = 1;
         this.sseStreams = new Map();
+        this.chatHistories = new Map();
         this.ctx.blockConcurrencyWhile(async () => {
             await this.initWasm();
             await this.restoreState();
@@ -897,6 +898,16 @@ export class MatchBoxWebSocketDO {
     async webSocketMessage(ws, message) {
         const att = ws.deserializeAttachment();
         if (!att) return;
+        const connectionId = att.id;
+
+        // Intercept "chat " messages for JS-based RAG pipeline
+        if (typeof message === 'string' && message.startsWith('chat ')) {
+            const prompt = message.slice(5).trim();
+            if (prompt) {
+                await this.handleChatRAG(connectionId, prompt);
+            }
+            return;
+        }
 
         const isText = typeof message === 'string';
         const msgBytes = isText
@@ -906,13 +917,12 @@ export class MatchBoxWebSocketDO {
         currentDO = this;
         try {
             let resultJson = vm_on_message(
-                att.id,
+                connectionId,
                 isText ? 0 : 1,
                 msgBytes,
             );
             let result = JSON.parse(resultJson);
 
-            // Async pause/resume cycle: the VM may yield for D1/embed calls
             while (result.__paused__ && result.ops) {
                 const asyncResults = [];
                 for (const op of result.ops) {
@@ -939,6 +949,102 @@ export class MatchBoxWebSocketDO {
         } finally {
             currentDO = null;
         }
+    }
+
+    async handleChatRAG(connectionId, prompt) {
+        if (!this.chatHistories.has(connectionId)) {
+            this.chatHistories.set(connectionId, []);
+        }
+        const history = this.chatHistories.get(connectionId);
+
+        this.sseSend(connectionId, 'user_msg', { type: 'user_msg', content: prompt });
+
+        history.push({ role: 'user', content: prompt });
+        if (history.length > 40) {
+            history.splice(0, history.length - 40);
+        }
+
+        let ragContext = '';
+        try {
+            const embedding = await this.embedQuery(prompt);
+            if (embedding) {
+                const matches = await this.queryVectorize(embedding, 5);
+                if (matches && matches.length > 0) {
+                    const chunkIds = matches.map(m => m.id);
+                    const chunkTexts = await this.lookupChunksFromD1(chunkIds);
+                    ragContext = chunkTexts.map((t, i) =>
+                        `[Source: ${matches[i].metadata?.path || matches[i].id}] Score: ${(matches[i].score * 100).toFixed(0)}%\n${t}`
+                    ).join('\n\n');
+                }
+            }
+        } catch (err) {
+            console.error('RAG pipeline error:', err);
+        }
+
+        const messages = [
+            {
+                role: 'system',
+                content: 'You are a BoxLang documentation assistant. Answer questions about BoxLang, MatchBox, and related technologies.' +
+                    (ragContext ? '\n\nRelevant documentation context:\n' + ragContext : ''),
+            },
+            ...history.slice(-20),
+        ];
+
+        const apiKey = this.env.OPENROUTER_API_KEY;
+        if (!apiKey) {
+            this.sseSend(connectionId, 'error', { type: 'error', body: 'AI service not configured' });
+            this.sseSend(connectionId, 'ai_done', { type: 'ai_done' });
+            return;
+        }
+
+        await this.streamOpenRouter(connectionId, JSON.stringify(messages), 'deepseek/deepseek-v4-flash:free', apiKey);
+
+        history.push({ role: 'assistant', content: '' });
+        if (history.length > 40) {
+            history.splice(0, history.length - 40);
+        }
+    }
+
+    async embedQuery(text) {
+        if (this.env.AI) {
+            try {
+                const response = await this.env.AI.run('@cf/baai/bge-base-en-v1.5', { text });
+                const data = response?.data || response?.result?.data || [];
+                return data[0] || null;
+            } catch (err) {
+                console.error('Workers AI embed error:', err);
+            }
+        }
+        return null;
+    }
+
+    async queryVectorize(vector, topK) {
+        if (!this.env.VECTORIZE) return [];
+        try {
+            const result = await this.env.VECTORIZE.query(vector, { topK, returnMetadata: true, returnValues: false });
+            return (result.matches || []).map(m => ({
+                id: m.id,
+                score: 1 - (m.score / 2),
+                metadata: m.metadata || {},
+            }));
+        } catch (err) {
+            console.error('Vectorize query error:', err);
+            return [];
+        }
+    }
+
+    async lookupChunksFromD1(ids) {
+        if (!this.env.DB) return ids.map(() => '');
+        const texts = [];
+        for (const id of ids) {
+            try {
+                const r = await this.env.DB.prepare('SELECT text FROM chunks WHERE id = ?').bind(id).first();
+                texts.push(r?.text || '');
+            } catch {
+                texts.push('');
+            }
+        }
+        return texts;
     }
 
     async webSocketClose(ws, code, reason, wasClean) {
@@ -1206,7 +1312,7 @@ export class MatchBoxWebSocketDO {
         const apiKey = binding;
         const connectionId = msg.args.connection_id;
         const messages = msg.args.messages;
-        const model = msg.args.model || 'openrouter/free';
+        const model = msg.args.model || 'deepseek/deepseek-v4-flash:free';
         const self = this;
 
         if (!apiKey) {
@@ -1226,15 +1332,32 @@ export class MatchBoxWebSocketDO {
 
     sseSend(connectionId, eventType, data) {
         const entry = this.sseStreams.get(connectionId);
-        if (!entry) return false;
-        try {
-            entry.writer.write(entry.encoder.encode(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`));
-            return true;
-        } catch (err) {
-            console.error('sseSend error:', err);
-            this.sseStreams.delete(connectionId);
-            return false;
+        if (entry) {
+            try {
+                entry.writer.write(entry.encoder.encode(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`));
+                return true;
+            } catch (err) {
+                console.error('sseSend error:', err);
+                this.sseStreams.delete(connectionId);
+            }
         }
+        return this.wsSend(connectionId, JSON.stringify(data));
+    }
+
+    wsSend(connectionId, message) {
+        for (const ws of this.ctx.getWebSockets()) {
+            const att = ws.deserializeAttachment();
+            if (att && att.id === connectionId) {
+                try {
+                    ws.send(message);
+                    return true;
+                } catch (err) {
+                    console.error('wsSend error:', err);
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 
     async streamOpenRouter(connectionId, messagesJson, model, apiKey) {
@@ -1279,7 +1402,7 @@ export class MatchBoxWebSocketDO {
                 const trimmed = line.trim();
                 if (!trimmed || !trimmed.startsWith('data: ')) continue;
                 const data = trimmed.slice(6);
-                if (data === '[DONE]') continue;
+                if (data === '[DONE]') break;
 
                 try {
                     const parsed = JSON.parse(data);
