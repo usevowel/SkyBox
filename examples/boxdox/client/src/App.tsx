@@ -220,9 +220,9 @@ export default function App() {
     const text = input.value.trim()
     if (!text || chatSendDisabledRef.current) return
     input.value = ''
-    addChatMsg('user', text)
+    // Don't add locally — SSE will broadcast back the user message
     wsRef.current?.send('chat ' + text)
-  }, [addChatMsg])
+  }, [])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -301,6 +301,8 @@ export default function App() {
               <div key={i} className={'msg ' + msg.role}>
                 {msg.role === 'ai' && !msg.content ? (
                   <span style={{ color: 'var(--text-3)' }}>Thinking...</span>
+                ) : msg.role === 'ai' ? (
+                  <div dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) as string }} />
                 ) : msg.content}
               </div>
             ))}
@@ -527,7 +529,8 @@ function VowelAgent() {
             turnDetection: { mode: 'server_vad' },
           },
           _caption: { enabled: true, position: 'bottom-center', showRole: true, showStreaming: true },
-          borderGlow: { enabled: true, color: '#3b82f6', intensity: 20, width: 4, pulse: true },
+          borderGlow: { enabled: false },
+          floatingCursor: { enabled: false },
           instructions: 'You are the voice assistant for BoxDox. Help users learn BoxLang. Use searchKnowledgeBase for doc questions. After searching, navigate to the best matching doc page. Be concise.',
         }
         const client = new Vowel(config as any)

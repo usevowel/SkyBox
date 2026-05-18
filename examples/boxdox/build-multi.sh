@@ -72,5 +72,8 @@ bash "$PROJECT_ROOT/crates/matchbox-cf-worker/examples/build.sh" \
 ln -sf dist/worker.wasm "$SCRIPT_DIR/worker.wasm"
 echo "  Symlinked: $SCRIPT_DIR/worker.wasm -> dist/worker.wasm"
 
+# Remove large ONNX WASM (exceeds CF 25 MiB asset limit)
+find "$ASSETS_DIR" -name "*ort-wasm*" -delete 2>/dev/null
+
 echo "=== Build Complete ==="
 du -sh "$ASSETS_DIR" "$SCRIPT_DIR/dist/worker.wasm"

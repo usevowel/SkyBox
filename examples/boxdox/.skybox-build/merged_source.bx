@@ -1,9 +1,6 @@
 class BoxDoxListener {
 
     function onConnect(required channel) {
-        var userId = channel.getId();
-        variables.history = (variables.history ?: {});
-        variables.history[userId] = [];
         variables.navTree = (variables.navTree ?: null);
         variables.seeded = (variables.seeded ?: false);
 
@@ -12,7 +9,7 @@ class BoxDoxListener {
 
         channel.sendJson({
             "type" : "welcome",
-            "userId" : userId,
+            "userId" : channel.getId(),
             "seeded" : variables.seeded
         });
     }
@@ -22,13 +19,8 @@ class BoxDoxListener {
 
         var parts = listToArray(message, " ");
         var cmd = lcase(trim(parts[1] ?: ""));
-        var userId = channel.getId();
-        variables.history = (variables.history ?: {});
-        if (isNull(variables.history[userId])) { variables.history[userId] = []; }
 
-        if (cmd == "chat") {
-            handleChat(message, channel, userId);
-        } else if (cmd == "search") {
+        if (cmd == "search") {
             handleSearch(message, channel);
         } else if (cmd == "list") {
             handleList(channel);
@@ -38,14 +30,11 @@ class BoxDoxListener {
         } else if (cmd == "stats") {
             handleStats(channel);
         } else {
-            channel.sendJson({ "type" : "error", "body" : "Unknown command. Try: chat, search, list, seed, stats" });
+            channel.sendJson({ "type" : "error", "body" : "Unknown command" });
         }
     }
 
     function onClose(required channel) {
-        var userId = channel.getId();
-        variables.history = (variables.history ?: {});
-        structDelete(variables.history, userId);
     }
 
     function onHttpGet(required struct request) {
@@ -151,32 +140,6 @@ class BoxDoxListener {
         ];
     }
 
-    private function handleChat(required string message, required channel, required string userId) {
-        var prompt = trim(mid(message, 6, 2048));
-        if (len(prompt) == 0) { return; }
-
-        // Fire async ops (results are futures — not resolved due to VM limitation)
-        mxaiembed(prompt);
-        mxaiVectorizeQuery("VECTORIZE", "[]", 3, "{}");
-
-        var userMsg = variables.history[userId];
-        var messages = [];
-        arrayAppend(messages, { "role" : "system", "content" : "You are a BoxLang documentation assistant. Answer questions about BoxLang, MatchBox, and related technologies." });
-        var startIdx = max(1, arrayLen(userMsg) - 10);
-        for (var i = startIdx; i <= arrayLen(userMsg); i = i + 1) {
-            arrayAppend(messages, userMsg[i]);
-        }
-        arrayAppend(messages, { "role" : "user", "content" : prompt });
-
-        channel.sendJson({ "type" : "user_msg", "content" : prompt });
-
-        arrayAppend(userMsg, { "role" : "user", "content" : prompt });
-        arrayAppend(userMsg, { "role" : "assistant", "content" : "" });
-        if (arrayLen(userMsg) > 30) { arrayDeleteAt(userMsg, 1); arrayDeleteAt(userMsg, 1); }
-
-        openRouterChat("OPENROUTER_API_KEY", messagesToJson(messages), channel.getId(), prompt);
-    }
-
     private function handleSearch(required string message, required channel) {
         var query = trim(mid(message, 8, 1024));
         if (len(query) == 0) { channel.sendJson({ "type" : "error", "body" : "Search query required" }); return; }
@@ -223,36 +186,5 @@ class BoxDoxListener {
         return result;
     }
 
-    private string function messagesToJson(required array messages) {
-        var parts = [];
-        for (var i = 1; i <= arrayLen(messages); i = i + 1) {
-            var m = messages[i];
-            var content = escapeForJson(m.content);
-            arrayAppend(parts, '{"role":"' & m.role & '","content":"' & content & '"}');
-        }
-        var result = "";
-        for (var i = 1; i <= arrayLen(parts); i = i + 1) {
-            if (i > 1) result = result & ",";
-            result = result & parts[i];
-        }
-        return "[" & result & "]";
-    }
-
-    private string function escapeForJson(required string str) {
-        var result = "";
-        for (var i = 1; i <= len(str); i = i + 1) {
-            var c = mid(str, i, 1);
-            if (c >= " " && c <= "~" && c != '"' && c != "\\") {
-                result = result & c;
-            } else if (c == '"') {
-                result = result & '\\"';
-            } else if (c == "\\") {
-                result = result & "\\\\";
-            } else {
-                result = result & "?";
-            }
-        }
-        return result;
-    }
 }
 
