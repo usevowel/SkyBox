@@ -9,6 +9,12 @@ interface NavItem {
 
 interface ChatMsg { role: string; content: string }
 
+interface RagLogEntry {
+  timestamp: string
+  query: string
+  chunks: { id: string; text: string; score: number; metadata: Record<string, any> }[]
+}
+
 interface SearchResult {
   docId: string; title: string; text: string; score: number; metadata?: { path?: string }
 }
@@ -70,6 +76,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
+  const [ragLogs, setRagLogs] = useState<RagLogEntry[]>([])
 
   const wsRef = useRef<WebSocket | null>(null)
   const esRef = useRef<EventSource | null>(null)
@@ -118,6 +125,14 @@ export default function App() {
       appendAiChunk(m.content)
     })
     es.addEventListener('ai_done', () => finishAiBubble())
+    es.addEventListener('rag_debug', (e: MessageEvent) => {
+      try {
+        const m = JSON.parse(e.data)
+        if (m.chunks) {
+          setRagLogs(prev => [{ timestamp: new Date().toLocaleTimeString(), query: m.query || '', chunks: m.chunks }, ...prev].slice(0, 50))
+        }
+      } catch {}
+    })
     es.addEventListener('error', (e: MessageEvent) => {
       if (e.data) {
         try { const m = JSON.parse(e.data); addChatMsg('system', m.body) } catch {}
@@ -335,15 +350,15 @@ export default function App() {
         )}
       </div>
 
-      <RagDebugPanel />
+      <RagDebugPanel ragLogs={ragLogs} />
       <VowelAgent />
     </>
   )
 }
 
-function RagDebugPanel() {
+function RagDebugPanel({ ragLogs }: { ragLogs: RagLogEntry[] }) {
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'documents' | 'chat'>('documents')
+  const [tab, setTab] = useState<'documents' | 'chat' | 'live'>('documents')
   const [docs, setDocs] = useState<RagDoc[]>([])
   const [stats, setStats] = useState({ docCount: 0, chunkCount: 0 })
   const [ragQuery, setRagQuery] = useState('')
@@ -423,6 +438,8 @@ function RagDebugPanel() {
                   onClick={() => setTab('documents')}>Documents</button>
           <button className={'rag-debug-tab' + (tab === 'chat' ? ' active' : '')}
                   onClick={() => setTab('chat')}>Search</button>
+          <button className={'rag-debug-tab' + (tab === 'live' ? ' active' : '')}
+                  onClick={() => setTab('live')}>Live{ragLogs.length > 0 ? ` (${ragLogs.length})` : ''}</button>
         </div>
         <div className="rag-debug-body">
           {tab === 'documents' && (
@@ -475,6 +492,32 @@ function RagDebugPanel() {
                   </div>
                 ))}
               </>
+            )
+          )}
+          {tab === 'live' && (
+            ragLogs.length === 0 ? (
+              <p style={{ color: 'var(--text-3)', padding: 12 }}>No RAG calls yet. Ask the AI a question.</p>
+            ) : (
+              ragLogs.map((log, i) => (
+                <div key={i} style={{ marginBottom: 10, border: '1px solid var(--border)', borderRadius: 6, padding: 8, fontSize: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <strong style={{ color: 'var(--accent)' }}>{esc(log.query)}</strong>
+                    <span style={{ color: 'var(--text-3)' }}>{log.timestamp}</span>
+                  </div>
+                  <div style={{ color: 'var(--green)', fontSize: 11, marginBottom: 4 }}>
+                    {log.chunks.length} chunk{log.chunks.length !== 1 ? 's' : ''} retrieved
+                  </div>
+                  {log.chunks.map((chunk, j) => (
+                    <div key={j} className="result-item" style={{ marginBottom: 4 }}>
+                      <div>
+                        <span className="src">{esc(chunk.metadata?.path || chunk.id)}</span>
+                        <span className="score"> [{(chunk.score * 100).toFixed(0)}%]</span>
+                      </div>
+                      <div className="text">{esc(chunk.text || '')}</div>
+                    </div>
+                  ))}
+                </div>
+              ))
             )
           )}
         </div>

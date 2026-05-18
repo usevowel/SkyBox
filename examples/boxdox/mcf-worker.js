@@ -987,6 +987,7 @@ export class MatchBoxWebSocketDO {
                     ragContext = chunkTexts.map((t, i) =>
                         `[Source: ${matches[i].metadata?.path || matches[i].id}] Score: ${(matches[i].score * 100).toFixed(0)}%\n${t}`
                     ).join('\n\n');
+                    this.sseSend(connectionId, 'rag_debug', { type: 'rag_debug', query: prompt, chunks: matches.map((m, i) => ({ id: m.id, text: (chunkTexts[i] || '').slice(0, 300), score: m.score, metadata: m.metadata || {} })) });
                 }
             }
         } catch (err) {
