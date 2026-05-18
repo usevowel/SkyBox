@@ -13,6 +13,8 @@
         "wrangler": "^4.0.0"
     },
     "dependencies": {
-        "ws": "^8.20.0"
+        "@vowel.to/client": "^0.4.1-beta",
+        "esbuild": "^0.28.0",
+        "ws": "^8.20.1"
     }
 }

@@ -269,6 +269,18 @@ export default {
             }
         }
 
+        // Config endpoint: expose env vars to client (only publishable ones)
+        if (path === '/api/config') {
+            return new Response(JSON.stringify({
+                vowel: {
+                    appId: env.VOWEL_APP_ID || '',
+                },
+                ai: {
+                    model: 'deepseek/deepseek-v4-flash:free',
+                },
+            }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' } });
+        }
+
         // SSE endpoint: route to DO
         if (path === '/events') {
             const doId = env.WEBSOCKET_DO.idFromName('default');

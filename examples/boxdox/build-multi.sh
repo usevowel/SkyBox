@@ -23,32 +23,21 @@ for f in "$SCRIPT_DIR/src/listeners/BoxDoxListener.bx"; do
 done
 echo "  Merged source: $MERGED_FILE ($(wc -c < "$MERGED_FILE") bytes)"
 
-echo "[5/5] Copying static assets..."
-ASSETS_DIR="$SCRIPT_DIR/dist/assets"
-mkdir -p "$ASSETS_DIR/css" "$ASSETS_DIR/js"
-if ls "$SCRIPT_DIR/assets/css/"* >/dev/null 2>&1; then
-    cp -rf "$SCRIPT_DIR/assets/css/"* "$ASSETS_DIR/css/"
-    echo "  Copied CSS assets"
-fi
-if ls "$SCRIPT_DIR/assets/js/"* >/dev/null 2>&1; then
-    cp -rf "$SCRIPT_DIR/assets/js/"* "$ASSETS_DIR/js/"
-    echo "  Copied JS assets"
-fi
-if [ -f "$SCRIPT_DIR/assets/index.html" ]; then
-    cp -f "$SCRIPT_DIR/assets/index.html" "$ASSETS_DIR/index.html"
-    echo "  Copied index.html"
-fi
-echo "  Assets dir: $ASSETS_DIR"
+echo "[2/5] Building React frontend with Vite..."
+(cd "$SCRIPT_DIR/client" && bun install --frozen-lockfile 2>/dev/null; bun run build 2>&1 | tail -5)
+echo "  Vite build complete"
 
+echo "[3/5] Copying BoxDocs content to assets..."
+ASSETS_DIR="$SCRIPT_DIR/dist/assets"
+mkdir -p "$ASSETS_DIR/content"
 if [ -d "$BOXDOX_CONTENT" ]; then
-    echo "[5b/5] Copying BoxDocs content to assets..."
-    mkdir -p "$ASSETS_DIR/content"
     cp -rf "$BOXDOX_CONTENT/"* "$ASSETS_DIR/content/"
     CONTENT_COUNT=$(find "$ASSETS_DIR/content" -type f | wc -l)
     echo "  Copied $CONTENT_COUNT content files"
+fi
 
-    echo "[5c/5] Generating nav-tree.json..."
-    python3 -c "
+echo "[4/5] Generating nav-tree.json..."
+python3 -c "
 import sys, json, os
 rootdir = '$ASSETS_DIR/content'
 def build(dirpath):
@@ -70,9 +59,9 @@ def build(dirpath):
     return entry
 with open('$ASSETS_DIR/nav-tree.json','w') as f: json.dump(build(rootdir), f, indent=2)
 "
-    echo "  Generated nav-tree.json"
-fi
+echo "  Generated nav-tree.json"
 
+echo "[5/5] Compiling BoxLang Worker WASM..."
 bash "$PROJECT_ROOT/crates/matchbox-cf-worker/examples/build.sh" \
     "$SCRIPT_DIR" \
     "$MERGED_FILE" \
@@ -82,3 +71,6 @@ bash "$PROJECT_ROOT/crates/matchbox-cf-worker/examples/build.sh" \
 
 ln -sf dist/worker.wasm "$SCRIPT_DIR/worker.wasm"
 echo "  Symlinked: $SCRIPT_DIR/worker.wasm -> dist/worker.wasm"
+
+echo "=== Build Complete ==="
+du -sh "$ASSETS_DIR" "$SCRIPT_DIR/dist/worker.wasm"

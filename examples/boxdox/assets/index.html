@@ -591,94 +591,88 @@ window.showRagInfo = function(chunks) {
 };
 </script>
 
-<!-- ── Vowel Voice Agent Module ── -->
-<script type="module">
-import { Vowel } from 'https://cdn.jsdelivr.net/npm/@vowel.to/client/dist/client/index.mjs';
-
-const vowelConfig = window.__VOWEL_CONFIG__ || {};
-const appId = vowelConfig.appId || vowelConfig.apiKey || '';
-
+<!-- ── Vowel Voice Agent Module (bundled) ── -->
+<script type="module" src="/vowel-bundle.mjs"></script>
+<script>
 async function initVowelAgent() {
-  if (!appId) {
-    console.log('[vowel] No appId configured — voice agent disabled. Set window.__VOWEL_CONFIG__ = { appId: "..." }');
-    return;
+  const { Vowel } = window.__VowelExports || {};
+  if (!Vowel) { console.log('[vowel] Not available'); return; }
+
+  let appId = '';
+  try {
+    const r = await fetch('/api/config');
+    const cfg = await r.json();
+    appId = cfg?.vowel?.appId || '';
+  } catch (err) {
+    console.warn('[vowel] Config fetch failed:', err);
+    appId = (window.__VOWEL_CONFIG__ || {}).appId || '';
   }
+  if (!appId) { console.log('[vowel] No appId'); return; }
 
   const client = new Vowel({
-    appId: appId,
-    realtimeUrl: vowelConfig.url || 'wss://realtime.vowel.to/v1',
+    appId,
+    realtimeApiUrl: 'wss://realtime.vowel.to/v1',
+    _voiceConfig: {
+      provider: 'vowel-prime',
+      vowelPrimeConfig: { environment: 'testing' },
+      llmProvider: 'openrouter',
+      model: 'deepseek/deepseek-v4-flash:free',
+      stt: { provider: 'groq-whisper' },
+      tts: { provider: 'grok' },
+      voice: 'ara',
+      language: 'en-US',
+      turnDetection: { mode: 'server_vad' },
+    },
+    _caption: { enabled: true, position: 'bottom-center', showRole: true, showStreaming: true },
+    borderGlow: { enabled: true, color: '#3b82f6', intensity: 20, width: 4, pulse: true },
+    instructions: 'You are the voice assistant for BoxDox. Help users learn BoxLang. Use searchKnowledgeBase for doc questions. After searching, navigate to the best matching doc page. Be concise.',
   });
 
-  const actions = {
+  await client.registerActions({
     searchKnowledgeBase: {
-      name: 'searchKnowledgeBase',
-      description: 'Search the BoxLang documentation knowledge base for relevant context',
-      handler: async function(args) {
-        const query = args.query || args.text || '';
-        if (!query) return { error: 'Missing query' };
+      definition: { description: 'Search BoxLang documentation knowledge base' },
+      handler: async (args) => {
+        const q = args.query || args.text || '';
+        if (!q) return { results: [] };
         try {
-          const r = await fetch('/api/search?q=' + encodeURIComponent(query));
-          const data = await r.json();
-          return { results: data.results || [] };
-        } catch (err) {
-          return { error: err.message, results: [] };
-        }
+          const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+          return await r.json();
+        } catch (e) { return { error: e.message, results: [] } }
       },
     },
     navigateToDoc: {
-      name: 'navigateToDoc',
-      description: 'Navigate to a documentation page by path',
-      handler: async function(args) {
-        const path = args.path || '';
-        if (!path) return { error: 'Missing path' };
-        window.loadDoc(path);
-        return { success: true, path: path };
-      },
+      definition: { description: 'Navigate to a documentation page by path' },
+      handler: async (args) => { if (args.path) window.loadDoc(args.path); return { success: true }; },
     },
     getCurrentPageInfo: {
-      name: 'getCurrentPageInfo',
-      description: 'Get information about the currently viewed documentation page',
-      handler: function() {
-        const title = document.title;
-        const content = document.getElementById('content');
-        const headings = content ? Array.from(content.querySelectorAll('h1,h2,h3')).map(function(h) {
-          return { level: parseInt(h.tagName[1]), text: h.textContent };
-        }) : [];
-        return { title: title, sections: headings };
+      definition: { description: 'Get current page info' },
+      handler: () => {
+        const el = document.getElementById('content');
+        const headings = el ? Array.from(el.querySelectorAll('h1,h2,h3')).map(h => ({ level: parseInt(h.tagName[1]), text: h.textContent })) : [];
+        return { title: document.title, sections: headings };
       },
     },
     searchDocRoutes: {
-      name: 'searchDocRoutes',
-      description: 'Search documentation page titles and routes',
-      handler: async function(args) {
-        const query = (args.query || '').toLowerCase();
-        if (!query) return { results: [] };
-        const items = document.querySelectorAll('.nav-item[data-path]');
+      definition: { description: 'Search doc page titles and routes' },
+      handler: async (args) => {
+        const q = (args.query || '').toLowerCase();
+        if (!q) return { results: [] };
         const matches = [];
-        items.forEach(function(el) {
+        document.querySelectorAll('.nav-item[data-path]').forEach(el => {
           const path = el.dataset.path;
-          const label = el.querySelector('.label');
-          const title = label ? label.textContent : '';
-          if (path && (path.toLowerCase().includes(query) || title.toLowerCase().includes(query))) {
-            matches.push({ path: path, title: title });
-          }
+          const title = el.querySelector('.label')?.textContent || '';
+          if (path && (path.toLowerCase().includes(q) || title.toLowerCase().includes(q))) matches.push({ path, title });
         });
         return { results: matches.slice(0, 10) };
       },
     },
-  };
+  });
 
-  try {
-    await client.registerActions(actions);
-    client.start();
-    window.__vowelClient = client;
-    console.log('[vowel] Agent initialized');
-  } catch (err) {
-    console.warn('[vowel] Init error:', err);
-  }
+  await client.startSession();
+  window.__vowelClient = client;
+  console.log('[vowel] Agent initialized');
 }
-
-initVowelAgent();
+setTimeout(initVowelAgent, 1000);
 </script>
 </body>
 </html>
